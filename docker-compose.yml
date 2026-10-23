@@ -1,0 +1,36 @@
+services:
+  # Main development database
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"          # host:container — change the LEFT number if 5432 is taken
+    volumes:
+      - pgdata:/var/lib/postgresql              # data lives here and survives restarts
+      - ./db/init:/docker-entrypoint-initdb.d:ro  # schema, applied to a fresh volume
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Throwaway database for automated tests (data kept in memory)
+  db-test:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: quickkart
+      POSTGRES_PASSWORD: quickkart
+      POSTGRES_DB: quickkart_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    profiles: ["test"]
+
+volumes:
+  pgdata:

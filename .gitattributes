@@ -1,0 +1,2 @@
+# Keep Unix line endings so shell and SQL files work inside Docker on Windows too
+* text=auto eol=lf
