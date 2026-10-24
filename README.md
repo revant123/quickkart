@@ -44,6 +44,7 @@ npm test
 ```
 db/init/        schema + indexes (applied automatically to a fresh database)
 db/seed/        sample data (run manually, step 3 above)
+db/queries/     measurement scripts (EXPLAIN ANALYZE)
 api/src/        Express API
   config.ts     environment variables, validated at start-up
   db.ts         connection pool + withTransaction helper
@@ -63,6 +64,10 @@ docs/           task sheets, notes, architecture
 | POST | /api/auth/login | – | 200 | 400, 401 |
 | POST | /api/auth/logout | user | 204 | 401 |
 | GET | /api/auth/me | user | 200 | 401 |
+| GET | /api/stores | – | 200 | |
+| GET | /api/categories | – | 200 | |
+| GET | /api/stores/:storeId/slots | – | 200 | 400, 404 |
+| GET | /api/stores/:storeId/products?q=&category=&limit=&cursor= | – | 200 | 400, 404 |
 
 ## Engineering challenges
 
@@ -72,5 +77,5 @@ docs/           task sheets, notes, architecture
 | Same product in different stores | `store_inventory` junction table | ✅ schema |
 | Duplicate checkout requests | Idempotency keys | Day 3 |
 | Too many delivery bookings | Capacity-safe slot reservation | Day 3 |
-| Slow product search | Trigram index + keyset pagination | Day 2 |
+| Slow product search | Trigram index + keyset pagination (measured with EXPLAIN ANALYZE) | ✅ |
 | Setup differs between machines | Docker Compose | ✅ |

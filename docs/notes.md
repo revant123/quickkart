@@ -20,3 +20,33 @@
 
 
 ### Still unclear
+### Search measurements (store 1, 50,000 products)
+| Search | Without index | With trigram index |
+|---|---|---|
+| "4242" (about 15 matches) | ___ ms, Seq Scan | ___ ms, Bitmap Index Scan |
+| "milk" (about 5,000 matches) | ___ ms, Seq Scan | ___ ms |
+
+### What I learned
+- A normal B-tree index can't help `ILIKE '%term%'` because the term can start anywhere
+  in the name. A trigram index splits names into 3-letter pieces, so PostgreSQL can find
+  names containing the term without reading every row.
+- The index helped "4242" hugely because it is selective (few matches). It helped "milk"
+  much less: with about 5,000 matches, most of the time goes to fetching and sorting those
+  rows, which no index avoids. An index pays off when a query keeps a small fraction of rows.
+- Indexes are not free: they use disk space and slow down every INSERT and UPDATE,
+  so you add them for queries you actually run, after measuring.
+- Search needs at least 3 characters for the trigram index to help.
+
+### Keyset (cursor) pagination
+- OFFSET pagination makes the database read and discard all earlier rows, so deep pages
+  get slower, and items shift if new products are added while scrolling.
+- Keyset pagination remembers the last row seen (name, id) and asks for rows after it,
+  so page 500 costs the same as page 1 and there are no duplicates. `id` breaks ties
+  between products with the same name. Trade-off: you can't jump to "page 37", only "next".
+```
+
+Note: exact times change every run (the first run is often slower because data is not
+yet in memory). Run it twice and use the second result.
+
+first time - Execution Time: 19.433 ms and Execution Time: 37.891 ms
+second time - Execution Time: 0.544 ms and Execution Time: 21.947 ms

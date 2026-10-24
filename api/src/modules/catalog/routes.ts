@@ -1,0 +1,122 @@
+import { Router } from 'express';
+import { z } from 'zod';
+import { pool } from '../../db.js';
+import { HttpError } from '../../errors.js';
+
+export const catalogRouter = Router();
+
+const StoreId = z.coerce.number().int().positive();
+
+// GET /api/stores -> active stores
+catalogRouter.get('/stores', async (_req, res) => {
+  const { rows } = await pool.query(
+    'SELECT id, name, city, pincode FROM stores WHERE is_active ORDER BY name',
+  );
+  res.json(rows);
+});
+
+// GET /api/categories -> all categories
+catalogRouter.get('/categories', async (_req, res) => {
+  const { rows } = await pool.query('SELECT id, name, slug FROM categories ORDER BY name');
+  res.json(rows);
+});
+
+/** 404 unless the store exists and is active. */
+async function assertStore(storeId: number) {
+  const { rowCount } = await pool.query('SELECT 1 FROM stores WHERE id = $1 AND is_active', [
+    storeId,
+  ]);
+  if (rowCount === 0) throw new HttpError(404, 'store_not_found');
+}
+
+// GET /api/stores/:storeId/slots -> upcoming delivery slots that still have room
+catalogRouter.get('/stores/:storeId/slots', async (req, res) => {
+  const storeId = StoreId.parse(req.params.storeId);
+  await assertStore(storeId);
+  const { rows } = await pool.query(
+    `SELECT id, starts_at, ends_at, capacity - booked AS free
+       FROM delivery_slots
+      WHERE store_id = $1 AND starts_at > now() AND booked < capacity
+      ORDER BY starts_at
+      LIMIT 12`,
+    [storeId],
+  );
+  res.json(rows);
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/stores/:storeId/products?q=milk&category=dairy&limit=20&cursor=...
+//
+// Search + filter + KEYSET pagination.
+//   Offset pagination (OFFSET 10000) makes the database read and throw away
+//   10,000 rows, and shows duplicates if rows are inserted while scrolling.
+//   Keyset pagination remembers the last row seen (name, id) and asks for rows
+//   AFTER it, so every page costs the same. `id` breaks ties between equal names.
+// ---------------------------------------------------------------------------
+
+const ProductQuery = z.object({
+  q: z.string().trim().min(1).max(60).optional(),
+  category: z.string().trim().min(1).max(60).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.string().max(300).optional(),
+});
+
+const Cursor = z.object({ name: z.string(), id: z.string() });
+type Cursor = z.infer<typeof Cursor>;
+
+/** In LIKE patterns, % and _ are wildcards. Escape them so "100%" means the text "100%". */
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, (m) => '\\' + m);
+
+const encodeCursor = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString('base64url');
+
+function decodeCursor(s: string): Cursor {
+  try {
+    return Cursor.parse(JSON.parse(Buffer.from(s, 'base64url').toString('utf8')));
+  } catch {
+    throw new HttpError(400, 'bad_cursor');
+  }
+}
+
+catalogRouter.get('/stores/:storeId/products', async (req, res) => {
+  const storeId = StoreId.parse(req.params.storeId);
+  const { q, category, limit, cursor } = ProductQuery.parse(req.query);
+  await assertStore(storeId);
+
+  // Only these fixed SQL fragments are ever joined together.
+  // Every user-supplied VALUE goes through a $n placeholder (no SQL injection).
+  const where = ['si.store_id = $1', 'si.is_listed'];
+  const params: unknown[] = [storeId];
+  const param = (value: unknown) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+
+  if (q) where.push(`p.name ILIKE ${param(`%${escapeLike(q)}%`)}`);
+  if (category) where.push(`c.slug = ${param(category)}`);
+  if (cursor) {
+    const c = decodeCursor(cursor);
+    where.push(`(p.name, p.id) > (${param(c.name)}, ${param(c.id)})`);
+  }
+  // Fetch one extra row: if it comes back, there is a next page.
+  const limitParam = param(limit + 1);
+
+  const { rows } = await pool.query(
+    `SELECT p.id, p.name, p.unit, p.image_url, c.slug AS category,
+            si.price_paise, si.stock > 0 AS in_stock
+       FROM store_inventory si
+       JOIN products   p ON p.id = si.product_id
+       JOIN categories c ON c.id = p.category_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY p.name, p.id
+      LIMIT ${limitParam}`,
+    params,
+  );
+
+  const hasMore = rows.length > limit;
+  const items = rows.slice(0, limit);
+  const last = items.at(-1);
+  res.json({
+    items,
+    nextCursor: hasMore && last ? encodeCursor({ name: last.name, id: String(last.id) }) : null,
+  });
+});
