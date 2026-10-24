@@ -55,7 +55,8 @@ REAL:  10 buyers, 1 in stock -> 1 order created, 9 told "out of stock", stock no
 db/init/        schema + indexes (applied automatically to a fresh database)
 db/seed/        sample data (run manually, step 3 above)
 db/queries/     measurement scripts (EXPLAIN ANALYZE), add-slots.sql
-scripts/        try-checkout.sh: place real orders through the running API
+scripts/        try-checkout.sh, try-day4.sh: exercise the running API
+                make-admin.sh: promote a user to admin (no API for this, on purpose)
 api/src/        Express API
   config.ts     environment variables, validated at start-up
   db.ts         connection pool + withTransaction helper
@@ -80,6 +81,15 @@ docs/           task sheets, notes, architecture
 | GET | /api/stores/:storeId/slots | – | 200 | 400, 404 |
 | GET | /api/stores/:storeId/products?q=&category=&limit=&cursor= | – | 200 | 400, 404 |
 | POST | /api/orders (header `Idempotency-Key`) | user | 201 | 400, 401, 409, 422 |
+| GET | /api/orders | user | 200 | 401 |
+| GET | /api/orders/:id | owner | 200 | 401, 404 |
+| POST | /api/orders/:id/cancel | owner | 200 | 401, 404, 409 |
+| GET | /api/admin/stores/:storeId/inventory | admin | 200 | 401, 403, 404 |
+| PATCH | /api/admin/stores/:storeId/inventory/:productId | admin | 200 | 400, 403, 404, 409 |
+| POST | /api/admin/stores/:storeId/slots | admin | 201 | 400, 403, 409 |
+| GET | /api/admin/orders, /api/admin/orders/:id | admin | 200 | 401, 403, 404 |
+| PATCH | /api/admin/orders/:id/status | admin | 200 | 400, 403, 404, 409 |
+| GET | /api/admin/reports/sales, /top-products, /slots | admin | 200 | 400, 403 |
 
 ## Engineering challenges
 

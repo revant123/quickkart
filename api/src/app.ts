@@ -5,6 +5,8 @@ import { errorHandler } from './errors.js';
 import { authRouter } from './modules/auth/routes.js';
 import { catalogRouter } from './modules/catalog/routes.js';
 import { ordersRouter } from './modules/orders/routes.js';
+import { adminRouter } from './modules/admin/routes.js';
+import { requireAuth, requireRole } from './middleware/auth.js';
 
 /**
  * Builds the Express app WITHOUT starting a server, so tests can send
@@ -23,7 +25,8 @@ export function buildApp() {
   app.use('/api/auth', authRouter);
   app.use('/api', catalogRouter);
   app.use('/api/orders', ordersRouter);
-  // Day 4: admin router gets mounted here
+  // Every admin route: must be logged in (401) AND be an admin (403)
+  app.use('/api/admin', requireAuth, requireRole('admin'), adminRouter);
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'not_found' });

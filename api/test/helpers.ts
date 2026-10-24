@@ -68,6 +68,31 @@ export async function countRows(table: 'orders' | 'order_items' | 'idempotency_k
   return rows[0].n as number;
 }
 
+/** Registers a user, promotes them to admin, logs in again (role lives in the token). */
+export async function registerAdmin(app: Express, email = 'admin@example.com'): Promise<string> {
+  await registerAndGetCookie(app, email, 'admin-pass-123');
+  await pool.query(`UPDATE users SET role = 'admin' WHERE email = $1`, [email]);
+  const res = await request(app)
+    .post('/api/auth/login')
+    .send({ email, password: 'admin-pass-123' });
+  return sessionCookie(res);
+}
+
+/** Places an order through the API and returns its id. */
+export async function placeTestOrder(
+  app: Express,
+  cookie: string,
+  items: { productId: number; quantity: number }[],
+): Promise<string> {
+  const res = await request(app)
+    .post('/api/orders')
+    .set('Cookie', cookie)
+    .set('Idempotency-Key', `k-${Math.random()}`)
+    .send({ storeId: 1, slotId: 1, address: '12 Sector 17, Chandigarh', items });
+  if (res.status !== 201) throw new Error(`order failed: ${res.status} ${JSON.stringify(res.body)}`);
+  return res.body.orderId;
+}
+
 /** Extracts "session=..." from a response's Set-Cookie header. */
 export function sessionCookie(res: request.Response): string {
   const raw = res.headers['set-cookie'] as unknown as string[] | undefined;
