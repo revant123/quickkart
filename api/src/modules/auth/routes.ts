@@ -21,6 +21,13 @@ const Login = Register.pick({ email: true, password: true });
 export const PUBLIC_USER = `id, email, name, role, store_id, phone,
   email_verified_at IS NOT NULL AS email_verified`;
 
+/** Adds what the website needs to know about this server's rules for the user. */
+const withRules = <T extends { email_verified: boolean }>(user: T) => ({
+  ...user,
+  // Checkout is blocked until the email is confirmed (only if this server requires it)
+  must_verify_email: config.REQUIRE_VERIFIED_EMAIL && !user.email_verified,
+});
+
 /** Queues the "confirm your email" message (in the caller's transaction). */
 async function sendVerification(db: Queryable, user: { id: string; email: string; name: string }) {
   const token = await issueToken(db, user.id, 'verify_email');
@@ -38,16 +45,16 @@ authRouter.post('/register', async (req, res) => {
   try {
     const row = await withTransaction(async (db) => {
       const { rows } = await db.query(
-        `INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3)
+        `INSERT INTO users (email, password_hash, name, role) VALUES ($1, $2, $3, $4)
          RETURNING ${PUBLIC_USER}, token_version`,
-        [body.email, hash, body.name],
+        [body.email, hash, body.name, config.ADMIN_EMAILS.includes(body.email) ? 'admin' : 'customer'],
       );
       await sendVerification(db, rows[0]);
       return rows[0];
     });
     const { token_version, ...user } = row;
     setSession(res, { id: user.id, token_version });
-    res.status(201).json(user);
+    res.status(201).json(withRules(user));
   } catch (e: any) {
     if (e.code === '23505') throw new HttpError(409, 'email_taken'); // unique_violation
     throw e;
@@ -68,7 +75,7 @@ authRouter.post('/login', async (req, res) => {
   }
   const { password_hash: _hash, token_version, ...user } = found;
   setSession(res, { id: user.id, token_version });
-  res.json(user);
+  res.json(withRules(user));
 });
 
 // POST /api/auth/logout  -> 204 (this browser only)
@@ -87,7 +94,7 @@ authRouter.post('/logout-all', requireAuth, async (req, res) => {
 // GET /api/auth/me  -> 200 + current user, or 401
 authRouter.get('/me', requireAuth, async (req, res) => {
   const { rows } = await pool.query(`SELECT ${PUBLIC_USER} FROM users WHERE id = $1`, [req.user!.id]);
-  res.json(rows[0]);
+  res.json(withRules(rows[0]));
 });
 
 // ===========================================================================
@@ -110,7 +117,7 @@ authRouter.post('/verify-email', async (req, res) => {
     );
     return rows[0];
   });
-  res.json(user);
+  res.json(withRules(user));
 });
 
 // POST /api/auth/resend-verification -> 202 | 409 already_verified

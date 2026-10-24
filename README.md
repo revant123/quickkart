@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/revant123/quickkart/actions/workflows/ci.yml/badge.svg)](https://github.com/revant123/quickkart/actions/workflows/ci.yml)
 
+**Live demo:** LIVE-URL (free hosting: the first visit after a quiet spell takes about a minute to wake up)
+
 A multi-store quick-commerce platform, inspired by 10-minute grocery delivery apps.
 Customers find the dark store that delivers to them, pick a 30-minute delivery slot, and pay
 online (Razorpay) or in cash; store staff pack orders and riders deliver them. Built to show what goes wrong when many people
@@ -162,6 +164,14 @@ Schema changes are numbered files in `api/migrations/`; the API applies new ones
 (or run `npm run migrate`).
 Wipe all data and reload the samples: `bash scripts/reset-data.sh`.
 
+### On the internet (Render, free plan)
+
+`render.yaml` describes the whole deployment: one Docker web service (the API also serves
+the website), PostgreSQL and Redis. Render dashboard → **New → Blueprint** → this repo, then
+fill in the secrets it asks for. Migrations, sample data and delivery slots set themselves
+up. Every push to `main` redeploys. Step by step: [docs/batch-c-tasks.md](docs/batch-c-tasks.md);
+the trade-offs: [ADR 0011](docs/adr/0011-deploying-as-one-container-on-render.md).
+
 ## Tests
 
 ```bash
@@ -251,7 +261,6 @@ docs/                architecture, ADRs, performance, scaling
 
 ## What I'd do next
 
-- Deploy publicly with HTTPS (Render), so Razorpay webhooks can reach it.
 - A real SMS provider; reconcile with Razorpay before expiring an order.
 - Automatic rider assignment from live rider locations.
 - Split hot stock into buckets for flash sales ([scaling.md](docs/scaling.md)).

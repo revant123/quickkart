@@ -30,6 +30,26 @@ redis?.on('error', () => {
   /* errors are handled per call (fallback to the database); avoid log spam */
 });
 
+/**
+ * Waits until Redis is connected (or `ms` passes). Commands fail at once while it
+ * isn't (enableOfflineQueue: false), so start-up work that must reach Redis, like
+ * loading the rate limiter's scripts, waits for this first.
+ */
+export function waitForRedis(ms = 5000): Promise<boolean> {
+  if (!redis) return Promise.resolve(false);
+  if (redis.status === 'ready') return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = (ok: boolean) => {
+      clearTimeout(timer);
+      redis!.off('ready', onReady);
+      resolve(ok);
+    };
+    const onReady = () => done(true);
+    const timer = setTimeout(() => done(false), ms);
+    redis!.once('ready', onReady);
+  });
+}
+
 export type CacheStatus = 'HIT' | 'MISS' | 'OFF';
 
 /** Returns the cached value for `key`, or runs `load`, stores it for `ttl` seconds and returns it. */

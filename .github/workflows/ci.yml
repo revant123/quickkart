@@ -75,3 +75,24 @@ jobs:
       - uses: actions/checkout@v5
       - run: cp .env.example .env
       - run: docker compose build api web
+
+      # The single image Render deploys: build it, start it against a fresh
+      # PostgreSQL, and check the site, the API and the automatic sample data.
+      - run: docker build -t quickkart .
+      - name: Smoke-test the deploy image
+        run: |
+          docker network create qk
+          docker run -d --name pg --network qk -e POSTGRES_USER=quickkart -e POSTGRES_PASSWORD=quickkart -e POSTGRES_DB=quickkart postgres:18
+          for i in $(seq 1 30); do docker exec pg pg_isready -U quickkart -d quickkart && break; sleep 1; done
+          docker run -d --name app --network qk -p 10000:10000 \
+            -e DATABASE_URL=postgres://quickkart:quickkart@pg:5432/quickkart \
+            -e JWT_SECRET=ci-secret-ci-secret-ci-secret-1234567 -e SEED_ON_EMPTY=true quickkart
+          for i in $(seq 1 60); do curl -fs localhost:10000/api/health && break; sleep 2; done
+          curl -fs localhost:10000/ | grep -q '<div id="root">'
+          curl -fs localhost:10000/orders/123 | grep -q '<div id="root">'   # app routes get the page
+          for i in $(seq 1 60); do [ "$(curl -fs localhost:10000/api/stores | jq length)" = "3" ] && break; sleep 3; done
+          curl -fs localhost:10000/api/stores | jq -e 'length == 3'
+          curl -fs "localhost:10000/api/stores/nearest?pincode=160017" | jq -e '.stores[0].delivers'
+          curl -fs "localhost:10000/api/stores/1/products?limit=5" | jq -e '.items | length == 5'
+      - if: always()
+        run: docker logs app || true

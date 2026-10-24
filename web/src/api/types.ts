@@ -10,6 +10,7 @@ export type User = {
   store_id: string | null; // riders: the store they work for
   phone: string | null;
   email_verified: boolean;
+  must_verify_email: boolean; // this server blocks checkout until the email is confirmed
 };
 
 export type Store = {

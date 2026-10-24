@@ -59,6 +59,7 @@ describe('email verification', () => {
     const place = () =>
       request(app).post('/api/orders').set('Cookie', cookie).set('Idempotency-Key', `k-${Math.random()}`)
         .send({ storeId: 1, slotId: 1, address: '12 Sector 17, Chandigarh', items: [{ productId: 1, quantity: 1 }] });
+    expect((await request(app).get('/api/auth/me').set('Cookie', cookie)).body.must_verify_email).toBe(true);
     const blocked = await place();
     expect(blocked.status).toBe(403);
     expect(blocked.body.error).toBe('email_not_verified');
@@ -66,6 +67,13 @@ describe('email verification', () => {
     const token = tokenFrom((await outbox('verify_email'))[0].data.link);
     await request(app).post('/api/auth/verify-email').send({ token }).expect(200);
     expect((await place()).status).toBe(201); // same cookie: verification is read from the DB
+    expect((await request(app).get('/api/auth/me').set('Cookie', cookie)).body.must_verify_email).toBe(false);
+  });
+
+  it('when not required (public demo), the website is told the customer can order at once', async () => {
+    const cookie = await registerAndGetCookie(app);
+    const me = (await request(app).get('/api/auth/me').set('Cookie', cookie)).body;
+    expect(me).toMatchObject({ email_verified: false, must_verify_email: false });
   });
 });
 

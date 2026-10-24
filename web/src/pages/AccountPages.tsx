@@ -11,7 +11,7 @@ import { ErrorNote, Spinner } from '../components/Feedback';
 /** "Confirm your email" reminder with a resend button. Shown on Account and Checkout. */
 export function VerifyEmailNotice({ user }: { user: User }) {
   const resend = useMutation({ mutationFn: () => api('/auth/resend-verification', { method: 'POST' }) });
-  if (user.email_verified) return null;
+  if (!user.must_verify_email) return null; // confirmed, or this server doesn't require it
   return (
     <div className="notice" role="status">
       <strong>Confirm your email to start ordering.</strong> We sent a link to {user.email}.

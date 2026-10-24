@@ -1,0 +1,74 @@
+# Render Blueprint: the whole of QuickKart on Render's free plan, from one file.
+# Render dashboard -> New -> Blueprint -> pick this repo. It creates:
+#   quickkart        web service (Docker): the API, which also serves the website
+#   quickkart-redis  Key Value (Redis): catalog cache + shared rate-limit counters
+#   quickkart-db     PostgreSQL
+# Values marked `sync: false` are secrets: Render asks you for them once, when the
+# Blueprint is first created; they never live in this repository.
+# Reference: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: quickkart
+    runtime: docker
+    plan: free
+    region: singapore              # closest Render region to India
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit      # every push to main deploys
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: quickkart-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: quickkart-redis
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true        # Render makes a long random secret
+      - key: COOKIE_SECURE
+        value: "true"              # HTTPS only
+      - key: TRUST_PROXY
+        value: "true"              # Render's proxy chain length isn't fixed (see ADR 0011)
+      - key: SEED_ON_EMPTY
+        value: "true"              # first start loads the sample shop
+      - key: DB_POOL_MAX
+        value: "5"                 # small free database
+      # A public demo: visitors can order without confirming an email address, and
+      # every email/SMS goes to YOUR inbox (Resend only delivers to you without a domain).
+      - key: REQUIRE_VERIFIED_EMAIL
+        value: "false"
+      - key: MAIL_FROM
+        value: QuickKart <onboarding@resend.dev>
+      - key: ADMIN_EMAILS          # your email: registering with it makes you the admin
+        sync: false
+      - key: RESEND_API_KEY        # resend.com -> API Keys (starts with re_)
+        sync: false
+      - key: MAIL_REDIRECT_TO      # the email address you signed up to Resend with
+        sync: false
+      # Razorpay TEST keys (dashboard.razorpay.com, Test Mode -> API Keys).
+      # Leave empty to use the built-in test gateway.
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET   # you choose it when adding the webhook in Razorpay
+        sync: false
+
+  - type: keyvalue
+    name: quickkart-redis
+    plan: free
+    region: singapore
+    maxmemoryPolicy: allkeys-lru   # a cache: drop old keys when full
+    ipAllowList: []                # no access from the internet; the app uses Render's private network
+
+databases:
+  - name: quickkart-db
+    plan: free
+    region: singapore
+    databaseName: quickkart
+    user: quickkart
+    postgresMajorVersion: "18"

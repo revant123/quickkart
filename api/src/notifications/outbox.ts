@@ -68,10 +68,35 @@ export async function notifyOrder(
 // Sending
 // ---------------------------------------------------------------------------
 
-export type OutgoingMail = { to: string; subject: string; text: string; html?: string };
+export type OutgoingMail = {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  /** Stable per outbox row: lets the provider drop a duplicate if we retry after a timeout */
+  idempotencyKey?: string;
+};
 export type Mailer = (mail: OutgoingMail) => Promise<void>;
 
+/** Resend's REST API over HTTPS (port 443), for hosts that block SMTP ports. */
+function resendMailer(apiKey: string): Mailer {
+  return async (m) => {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        ...(m.idempotencyKey ? { 'Idempotency-Key': m.idempotencyKey } : {}),
+      },
+      body: JSON.stringify({ from: config.MAIL_FROM, to: [m.to], subject: m.subject, text: m.text, html: m.html }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`Resend ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  };
+}
+
 function defaultMailer(): Mailer {
+  if (config.RESEND_API_KEY) return resendMailer(config.RESEND_API_KEY);
   if (!config.SMTP_URL) {
     // No SMTP server configured: print the message so links can still be clicked
     return async (m) => {
@@ -84,9 +109,9 @@ function defaultMailer(): Mailer {
   };
 }
 
-let mailer: Mailer = defaultMailer();
+let mailer: Mailer | null = null; // created on first use, so config changes (tests) apply
 /** Tests replace the mailer to capture or fail messages. Returns the previous one. */
-export function setMailer(m: Mailer): Mailer {
+export function setMailer(m: Mailer | null): Mailer | null {
   const prev = mailer;
   mailer = m;
   return prev;
@@ -97,13 +122,20 @@ const BATCH = 20;
 /** 30 s, 1 min, 2 min, 4 min... capped at 1 hour */
 const backoffSeconds = (attempts: number) => Math.min(3600, 30 * 2 ** (attempts - 1));
 
-function toMail(row: { channel: string; recipient: string; template: Template; data: never }): OutgoingMail {
+export function toMail(row: { id?: string | number; channel: string; recipient: string; template: Template; data: never }): OutgoingMail {
   const r = render(row.template, row.data);
-  if (row.channel === 'sms') {
-    // No free SMS gateway: deliver the text to the inbox, clearly labelled
-    return { to: `${row.recipient}@${config.SMS_EMAIL_DOMAIN}`, subject: `SMS to +91 ${row.recipient}`, text: r.sms };
+  const mail: OutgoingMail =
+    row.channel === 'sms'
+      // No free SMS gateway: deliver the text to the inbox, clearly labelled
+      ? { to: `${row.recipient}@${config.SMS_EMAIL_DOMAIN}`, subject: `SMS to +91 ${row.recipient}`, text: r.sms }
+      : { to: row.recipient, subject: r.subject, text: r.text, html: r.html };
+  if (row.id !== undefined) mail.idempotencyKey = `quickkart-outbox-${row.id}`;
+  if (config.MAIL_REDIRECT_TO) {
+    // Demo mode: everything to one inbox, saying who it was really for
+    if (row.channel === 'email') mail.subject = `[for ${row.recipient}] ${mail.subject}`; // SMS subjects already say
+    mail.to = config.MAIL_REDIRECT_TO;
   }
-  return { to: row.recipient, subject: r.subject, text: r.text, html: r.html };
+  return mail;
 }
 
 /** Sends up to one batch of due messages. Returns how many were sent and failed. */
@@ -122,6 +154,7 @@ export async function drainOutbox(): Promise<{ sent: number; failed: number }> {
   let failed = 0;
   for (const row of rows) {
     try {
+      mailer ??= defaultMailer();
       await mailer(toMail(row));
       await pool.query(`UPDATE outbox SET status = 'sent', sent_at = now(), last_error = NULL WHERE id = $1`, [row.id]);
       sent++;

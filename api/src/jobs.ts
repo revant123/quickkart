@@ -1,4 +1,5 @@
 import { pool } from './db.js';
+import { config } from './config.js';
 
 // ---------------------------------------------------------------------------
 // Background jobs: small tasks that run on a timer inside the API process.
@@ -77,8 +78,33 @@ export const cleanupIdempotencyKeys: Job = {
   },
 };
 
+/**
+ * Keeps 30-minute delivery slots open for the next 2 days at every active store, so a
+ * demo that runs for weeks never shows "no slots". Existing slots are left alone
+ * (ON CONFLICT on the store + start time). Same slot pattern as the sample data.
+ */
+export const keepSlotsOpen: Job = {
+  name: 'keep-slots-open',
+  everyMs: 60 * 60 * 1000, // hourly
+  lockId: 7_320_005,
+  async run() {
+    if (!config.AUTO_SLOTS) return;
+    const { rowCount } = await pool.query(
+      `INSERT INTO delivery_slots (store_id, starts_at, ends_at, capacity)
+       SELECT s.id, t, t + interval '30 minutes', 5
+         FROM stores s,
+              generate_series(date_trunc('hour', now()) + interval '1 hour',
+                              date_trunc('hour', now()) + interval '2 days',
+                              interval '30 minutes') AS t
+        WHERE s.is_active
+       ON CONFLICT (store_id, starts_at) DO NOTHING`,
+    );
+    return rowCount ? `opened ${rowCount} delivery slots` : undefined;
+  },
+};
+
 // Jobs from other modules register here too
 import { sendOutbox } from './notifications/outbox.js';
 import { expireUnpaidOrders, processRefunds } from './modules/payments/service.js';
 
-export const ALL_JOBS: Job[] = [cleanupIdempotencyKeys, sendOutbox, expireUnpaidOrders, processRefunds];
+export const ALL_JOBS: Job[] = [cleanupIdempotencyKeys, keepSlotsOpen, sendOutbox, expireUnpaidOrders, processRefunds];

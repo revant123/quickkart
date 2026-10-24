@@ -101,7 +101,7 @@ export function CheckoutPage() {
     store?.lat != null && store?.lng != null && kmBetween(a, { lat: store.lat, lng: store.lng }) > store.radius_km;
   const kmFromStore = (a: Address) =>
     store?.lat != null && store?.lng != null ? kmBetween(a, { lat: store.lat, lng: store.lng }).toFixed(1) : null;
-  const unverified = me.data ? !me.data.email_verified : false;
+  const unverified = me.data?.must_verify_email ?? false;
 
   const addressError = touched && !address ? 'Add a delivery address.' : touched && address && tooFar(address)
     ? `${store?.name} doesn’t deliver this far. Pick a nearer address, or change store at the top of the page.` : '';

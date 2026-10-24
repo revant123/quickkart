@@ -1,4 +1,5 @@
 import express from 'express';
+import path from 'node:path';
 import cookieParser from 'cookie-parser';
 import { pool } from './db.js';
 import { config } from './config.js';
@@ -28,7 +29,7 @@ export function buildApp(options: AppOptions = {}) {
 
   // Behind nginx (Docker) or Render's proxy: trust ONE proxy hop, so req.ip is
   // the real client address from X-Forwarded-For (needed for per-IP rate limits)
-  app.set('trust proxy', 1);
+  app.set('trust proxy', config.TRUST_PROXY);
 
   // The payment webhook needs the RAW body to check its signature, so it's
   // registered before the JSON parser (which would consume and re-shape it).
@@ -63,6 +64,32 @@ export function buildApp(options: AppOptions = {}) {
   app.use('/api/orders', createOrdersRouter(limiter.checkout));
   // Every admin route: must be logged in (401) AND be an admin (403)
   app.use('/api/admin', requireAuth, requireRole('admin'), adminRouter, adminImagesRouter, adminRidersRouter);
+
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'not_found' });
+  });
+
+  // Deployed as one container: the API also serves the built website, so the shop and
+  // the API share one origin (cookies and live updates just work, no CORS).
+  if (config.STATIC_DIR) {
+    const dir = path.resolve(config.STATIC_DIR);
+    app.use(
+      express.static(dir, {
+        index: false,
+        setHeaders(res, file) {
+          // Vite puts a content hash in asset file names, so they can be cached forever
+          res.setHeader('Cache-Control', file.includes(`${path.sep}assets${path.sep}`)
+            ? 'public, max-age=31536000, immutable' : 'public, max-age=3600');
+        },
+      }),
+    );
+    // Any other path is a page of the single-page app: send index.html, never cached
+    // (so a new deploy is picked up on the next visit)
+    app.get('/{*page}', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(path.join(dir, 'index.html'));
+    });
+  }
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'not_found' });
