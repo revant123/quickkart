@@ -7,6 +7,7 @@ import { App } from './App';
 import { StoreProvider } from './features/store/StoreContext';
 import { CartProvider } from './features/cart/CartContext';
 import { LiveProvider } from './features/live/LiveProvider';
+import { PaymentProvider } from './features/payments/PaymentProvider';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -27,7 +28,9 @@ createRoot(document.getElementById('root')!).render(
         <StoreProvider>
           <CartProvider>
             <LiveProvider>
-              <App />
+              <PaymentProvider>
+                <App />
+              </PaymentProvider>
             </LiveProvider>
           </CartProvider>
         </StoreProvider>

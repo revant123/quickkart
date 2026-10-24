@@ -1,4 +1,4 @@
-import type { OrderStatus } from '../api/types';
+import type { OrderStatus, PaymentMethod, PaymentStatus } from '../api/types';
 
 const rupees = new Intl.NumberFormat('en-IN', {
   style: 'currency',
@@ -33,6 +33,7 @@ export const formatSlot = (startIso: string, endIso: string) =>
 export const formatDateTime = (iso: string) => `${dayMonth.format(new Date(iso))}, ${formatTime(iso)}`;
 
 export const STATUS_LABEL: Record<OrderStatus, string> = {
+  PENDING_PAYMENT: 'Awaiting payment',
   PLACED: 'Placed',
   PACKED: 'Packed',
   OUT_FOR_DELIVERY: 'Out for delivery',
@@ -47,4 +48,27 @@ export const STATUS_LABEL: Record<OrderStatus, string> = {
 export function productNoun(name: string): string {
   const words = name.split(/\s+/).filter((w) => /^[a-z]+$/i.test(w));
   return (words.at(-1) ?? name).toLowerCase();
+}
+
+/** One line about the money, for order pages: "Cash on delivery", "Paid online", ... */
+export function paymentLabel(method: PaymentMethod, status: PaymentStatus): string {
+  if (method === 'cod') return status === 'paid' ? 'Paid in cash' : 'Cash on delivery';
+  return {
+    unpaid: 'Online', pending: 'Waiting for online payment', paid: 'Paid online',
+    failed: 'Online payment not completed', refund_pending: 'Refund on its way', refunded: 'Refunded',
+  }[status];
+}
+
+/** 125 -> "2:05" (minutes:seconds), for payment countdowns */
+export function formatCountdown(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** Straight-line distance in km between two points (haversine), same formula as the server */
+export function kmBetween(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const rad = (d: number) => (d * Math.PI) / 180;
+  const h = Math.sin(rad(b.lat - a.lat) / 2) ** 2 +
+    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
 }

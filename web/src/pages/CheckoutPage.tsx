@@ -2,13 +2,17 @@ import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, errorMessage } from '../api/client';
-import type { PlacedOrder, Slot } from '../api/types';
+import type { Address, PaymentMethod, PlacedOrder, Slot } from '../api/types';
 import { useCart } from '../features/cart/CartContext';
 import { cartTotal } from '../features/cart/cartReducer';
 import { useStore } from '../features/store/StoreContext';
-import { formatPaise, formatDay, formatTime } from '../lib/format';
-import { readStorage, writeStorage } from '../lib/storage';
+import { formatPaise, formatDay, formatTime, kmBetween } from '../lib/format';
 import { Empty, ErrorNote, Spinner } from '../components/Feedback';
+import { useMe } from '../features/auth/useAuth';
+import { formatAddress, useAddresses } from '../features/addresses/addresses';
+import { AddressForm } from '../features/addresses/AddressForm';
+import { usePayment } from '../features/payments/PaymentProvider';
+import { VerifyEmailNotice } from './AccountPages';
 
 type Attempt = { payload: string; key: string };
 
@@ -20,7 +24,12 @@ export function CheckoutPage() {
 
   const storeId = cart.storeId;
   const store = stores.find((s) => Number(s.id) === storeId);
-  const [address, setAddress] = useState<string>(() => readStorage('qk.address', ''));
+  const me = useMe();
+  const { pay } = usePayment();
+  const addresses = useAddresses();
+  const [chosenAddress, setChosenAddress] = useState<string | null>(null);
+  const [addingAddress, setAddingAddress] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('online');
   const [slotId, setSlotId] = useState<number | null>(null);
   const [touched, setTouched] = useState(false);
 
@@ -46,12 +55,20 @@ export function CheckoutPage() {
     // Retrying a POST is safe ONLY because of the key. Retry network errors and 5xx;
     // never 4xx (out of stock won't fix itself by asking again).
     retry: (count, err) => err instanceof ApiError && (err.status === 0 || err.status >= 500) && count < 2,
-    onSuccess: (order) => {
-      dispatch({ type: 'clear' });
-      writeStorage('qk.address', address.trim());
+    onSuccess: async (order) => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['slots'] });
       qc.invalidateQueries({ queryKey: ['products'] });
+      // Online: the order now holds its items; open the payment window straight away.
+      // Closing it (or an error) is fine: the order page offers "Pay now" until it expires.
+      if (order.paymentMethod === 'online') {
+        try {
+          await pay(order.orderId);
+        } catch {
+          /* shown on the order page */
+        }
+      }
+      dispatch({ type: 'clear' }); // after the payment window, so the page behind it stays put
       navigate(`/orders/${order.orderId}`, { replace: true, state: { justPlaced: true } });
     },
     onError: (err) => {
@@ -75,7 +92,19 @@ export function CheckoutPage() {
     );
   }
 
-  const addressError = touched && address.trim().length < 5 ? 'Enter your full delivery address.' : '';
+  // Which saved address? The one picked, else the default, else the first
+  const list = addresses.data ?? [];
+  const address: Address | undefined =
+    list.find((a) => a.id === chosenAddress) ?? list.find((a) => a.is_default) ?? list[0];
+  // Same distance rule as the server, checked here first for instant feedback
+  const tooFar = (a: Address) =>
+    store?.lat != null && store?.lng != null && kmBetween(a, { lat: store.lat, lng: store.lng }) > store.radius_km;
+  const kmFromStore = (a: Address) =>
+    store?.lat != null && store?.lng != null ? kmBetween(a, { lat: store.lat, lng: store.lng }).toFixed(1) : null;
+  const unverified = me.data ? !me.data.email_verified : false;
+
+  const addressError = touched && !address ? 'Add a delivery address.' : touched && address && tooFar(address)
+    ? `${store?.name} doesn’t deliver this far. Pick a nearer address, or change store at the top of the page.` : '';
   const slotError = touched && !slotId ? 'Pick a delivery slot.' : '';
   const soldOutId =
     placeOrder.error instanceof ApiError && placeOrder.error.code === 'out_of_stock'
@@ -85,11 +114,12 @@ export function CheckoutPage() {
 
   const submit = () => {
     setTouched(true);
-    if (address.trim().length < 5 || !slotId) return;
+    if (!address || tooFar(address) || !slotId) return;
     const payload = JSON.stringify({
       storeId,
       slotId,
-      address: address.trim(),
+      addressId: Number(address.id),
+      paymentMethod,
       items: cart.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
     });
     if (!attempt.current || attempt.current.payload !== payload) {
@@ -105,22 +135,76 @@ export function CheckoutPage() {
 
       <div className="checkout-grid">
         <div>
+          {me.data && <VerifyEmailNotice user={me.data} />}
           <section className="panel" aria-labelledby="address-title">
             <div className="section-title">
               <h2 id="address-title">Delivery address</h2>
+              {!addingAddress && list.length > 0 && list.length < 10 && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setAddingAddress(true)}>Add new</button>
+              )}
             </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label htmlFor="address" className="visually-hidden">Delivery address</label>
-              <textarea
-                id="address"
-                className="textarea"
-                placeholder="House number, street, sector, city"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                aria-invalid={!!addressError}
+            {addresses.isPending ? (
+              <Spinner label="Loading your addresses" />
+            ) : addresses.isError ? (
+              <ErrorNote error={addresses.error} onRetry={() => addresses.refetch()} />
+            ) : addingAddress || list.length === 0 ? (
+              <AddressForm
+                submitLabel="Save and deliver here"
+                onSaved={(a) => {
+                  setChosenAddress(a.id);
+                  setAddingAddress(false);
+                }}
+                onCancel={list.length ? () => setAddingAddress(false) : undefined}
               />
-              {addressError && <span className="error">{addressError}</span>}
+            ) : (
+              <fieldset className="choice-list">
+                <legend className="visually-hidden">Choose a delivery address</legend>
+                {list.map((a) => {
+                  const far = tooFar(a);
+                  return (
+                    <div className={`choice${far ? ' disabled' : ''}`} key={a.id}>
+                      <input type="radio" name="address" id={`addr-${a.id}`} checked={address?.id === a.id}
+                        onChange={() => setChosenAddress(a.id)} />
+                      <label htmlFor={`addr-${a.id}`}>
+                        <span className="when">{a.label}</span>
+                        <span>{formatAddress(a)}</span>
+                        <span className="muted small">
+                          {a.phone}
+                          {kmFromStore(a) && ` · ${kmFromStore(a)} km from ${store?.name}`}
+                          {far && ' · too far for this store'}
+                        </span>
+                      </label>
+                    </div>
+                  );
+                })}
+              </fieldset>
+            )}
+            {addressError && <p className="error small" style={{ color: 'var(--chilli)' }}>{addressError}</p>}
+          </section>
+
+          <section className="panel" aria-labelledby="pay-title">
+            <div className="section-title">
+              <h2 id="pay-title">Payment</h2>
             </div>
+            <fieldset className="choice-list">
+              <legend className="visually-hidden">Choose how to pay</legend>
+              <div className="choice">
+                <input type="radio" name="pay" id="pay-online" checked={paymentMethod === 'online'}
+                  onChange={() => setPaymentMethod('online')} />
+                <label htmlFor="pay-online">
+                  <span className="when">Pay online</span>
+                  <span className="muted small">UPI, card or net banking, through Razorpay. Test mode: no real money.</span>
+                </label>
+              </div>
+              <div className="choice">
+                <input type="radio" name="pay" id="pay-cod" checked={paymentMethod === 'cod'}
+                  onChange={() => setPaymentMethod('cod')} />
+                <label htmlFor="pay-cod">
+                  <span className="when">Cash on delivery</span>
+                  <span className="muted small">Pay the rider when your order arrives.</span>
+                </label>
+              </div>
+            </fieldset>
           </section>
 
           <section className="panel" aria-labelledby="slot-title">
@@ -185,7 +269,10 @@ export function CheckoutPage() {
             <span>{formatPaise(cartTotal(cart))}</span>
           </div>
           <p className="muted small">
-            Prices are confirmed when you place the order. You pay on delivery.
+            Prices are confirmed when you place the order.{' '}
+            {paymentMethod === 'online'
+              ? 'Your items are held for 15 minutes while you pay.'
+              : 'You pay the rider in cash.'}
           </p>
 
           {placeOrder.isError && (
@@ -209,9 +296,14 @@ export function CheckoutPage() {
             </div>
           )}
 
-          <button className="btn btn-primary btn-block" onClick={submit} disabled={placeOrder.isPending}>
-            {placeOrder.isPending ? 'Placing order…' : `Place order, ${formatPaise(cartTotal(cart))}`}
+          <button className="btn btn-primary btn-block" onClick={submit} disabled={placeOrder.isPending || unverified}>
+            {placeOrder.isPending
+              ? paymentMethod === 'online' ? 'Opening payment…' : 'Placing order…'
+              : paymentMethod === 'online'
+                ? `Pay ${formatPaise(cartTotal(cart))}`
+                : `Place order, ${formatPaise(cartTotal(cart))}`}
           </button>
+          {unverified && <p className="muted small">Confirm your email first (see the note on the left).</p>}
         </aside>
       </div>
     </div>

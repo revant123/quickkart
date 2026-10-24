@@ -2,12 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router';
 import { useCart } from '../features/cart/CartContext';
 import { cartCount, cartTotal } from '../features/cart/cartReducer';
-import { useStore } from '../features/store/StoreContext';
 import { useLogout, useMe } from '../features/auth/useAuth';
 import { formatPaise } from '../lib/format';
+import { LocationButton } from '../features/location/LocationPicker';
 
 export function Header() {
-  const { stores, storeId, setStoreId } = useStore();
   const { cart, open } = useCart();
   const me = useMe();
   const logout = useLogout();
@@ -40,22 +39,7 @@ export function Header() {
           QuickKart
         </Link>
 
-        {stores.length > 0 && (
-          <div className="store-picker">
-            <label htmlFor="store-select">Delivering from</label>
-            <select
-              id="store-select"
-              value={storeId ?? ''}
-              onChange={(e) => setStoreId(Number(e.target.value))}
-            >
-              {stores.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
+        <LocationButton />
 
         <nav className="header-nav" aria-label="Main">
           {me.data?.role === 'admin' && (
@@ -63,10 +47,18 @@ export function Header() {
               Admin
             </NavLink>
           )}
+          {me.data?.role === 'rider' && (
+            <NavLink to="/rider" className="nav-link">
+              Deliveries
+            </NavLink>
+          )}
           {me.data ? (
             <>
               <NavLink to="/orders" className="nav-link">
                 Orders
+              </NavLink>
+              <NavLink to="/account" className="nav-link optional">
+                Account
               </NavLink>
               <button
                 className="nav-link optional"

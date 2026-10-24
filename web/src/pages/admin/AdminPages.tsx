@@ -3,11 +3,11 @@ import { NavLink, Outlet } from 'react-router';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage, uploadFile } from '../../api/client';
 import type {
-  AdminOrder, InventoryPage, InventoryRow, OrderStatus, SalesRow, SlotUse, TopProduct,
+  AdminOrder, InventoryPage, InventoryRow, OrderStatus, Rider, SalesRow, SlotUse, TopProduct,
 } from '../../api/types';
 import { useStore } from '../../features/store/StoreContext';
 import { useDebounce } from '../../hooks/useDebounce';
-import { formatDateTime, formatPaise, formatSlot, formatTime, formatDay } from '../../lib/format';
+import { formatDateTime, formatPaise, formatSlot, formatTime, formatDay, paymentLabel } from '../../lib/format';
 import { Empty, ErrorNote, Spinner } from '../../components/Feedback';
 import { StatusBadge } from '../OrderPages';
 import { useEventSource } from '../../features/live/LiveProvider';
@@ -48,6 +48,7 @@ export function AdminLayout() {
         <NavLink end to="/admin" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Orders</NavLink>
         <NavLink to="/admin/inventory" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Stock and prices</NavLink>
         <NavLink to="/admin/slots" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Delivery slots</NavLink>
+        <NavLink to="/admin/riders" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Riders</NavLink>
         <NavLink to="/admin/reports" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Sales</NavLink>
       </nav>
       <Outlet />
@@ -89,6 +90,7 @@ function useDefaultStore(): [number | '', (v: number | '') => void] {
 // ===========================================================================
 
 const NEXT_ACTIONS: Record<OrderStatus, { to: OrderStatus; label: string; danger?: boolean }[]> = {
+  PENDING_PAYMENT: [{ to: 'CANCELLED', label: 'Cancel', danger: true }],
   PLACED: [{ to: 'PACKED', label: 'Mark packed' }, { to: 'CANCELLED', label: 'Cancel', danger: true }],
   PACKED: [{ to: 'OUT_FOR_DELIVERY', label: 'Send out' }, { to: 'CANCELLED', label: 'Cancel', danger: true }],
   OUT_FOR_DELIVERY: [{ to: 'DELIVERED', label: 'Mark delivered' }],
@@ -98,6 +100,7 @@ const NEXT_ACTIONS: Record<OrderStatus, { to: OrderStatus; label: string; danger
 
 const STATUS_FILTERS: { value: OrderStatus | ''; label: string }[] = [
   { value: '', label: 'All' },
+  { value: 'PENDING_PAYMENT', label: 'Awaiting payment' },
   { value: 'PLACED', label: 'To pack' },
   { value: 'PACKED', label: 'Packed' },
   { value: 'OUT_FOR_DELIVERY', label: 'Out for delivery' },
@@ -161,6 +164,7 @@ export function AdminOrdersPage() {
                 <th>Delivery</th>
                 <th className="num">Items</th>
                 <th className="num">Total</th>
+                <th>Payment</th>
                 <th>Status</th>
                 <th>Next step</th>
               </tr>
@@ -177,7 +181,11 @@ export function AdminOrdersPage() {
                   <td>{formatTime(o.slot_start)}, {formatDay(o.slot_start)}</td>
                   <td className="num">{o.item_count}</td>
                   <td className="num">{formatPaise(o.total_paise)}</td>
-                  <td><StatusBadge status={o.status} /></td>
+                  <td className="small">{paymentLabel(o.payment_method, o.payment_status)}</td>
+                  <td>
+                    <StatusBadge status={o.status} />
+                    {o.rider_name && <div className="muted small">Rider: {o.rider_name}</div>}
+                  </td>
                   <td>
                     <div className="row-actions">
                       {NEXT_ACTIONS[o.status].map((a) => (
@@ -617,6 +625,100 @@ export function AdminReportsPage() {
                   <td>{p.name}</td>
                   <td className="num">{p.units_sold}</td>
                   <td className="num">{formatPaise(p.revenue_paise)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ===========================================================================
+// RIDERS: turn a registered customer into a delivery rider for one store
+// ===========================================================================
+
+export function AdminRidersPage() {
+  const qc = useQueryClient();
+  const { stores } = useStore();
+  const [email, setEmail] = useState('');
+  const [storeId, setStoreId] = useDefaultStore();
+
+  const riders = useQuery({ queryKey: ['admin', 'riders'], queryFn: () => api<Rider[]>('/admin/riders') });
+  const add = useMutation({
+    mutationFn: () => api('/admin/riders', { method: 'POST', body: JSON.stringify({ email: email.trim(), storeId }) }),
+    onSuccess: () => {
+      setEmail('');
+      qc.invalidateQueries({ queryKey: ['admin', 'riders'] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api(`/admin/riders/${id}`, { method: 'DELETE' }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['admin', 'riders'] }),
+  });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (email.trim() && storeId) add.mutate();
+  };
+
+  return (
+    <>
+      <section className="panel">
+        <h2 style={{ marginTop: 0 }}>Add a rider</h2>
+        <p className="muted small">
+          The person registers a normal account first. Adding them here gives them the Deliveries page
+          for one store; it takes effect on their next click.
+        </p>
+        <form className="inline-form" onSubmit={submit}>
+          <label htmlFor="rider-email" className="visually-hidden">Rider email</label>
+          <input id="rider-email" className="input" type="email" placeholder="rider@example.com"
+            value={email} onChange={(e) => setEmail(e.target.value)} />
+          <label htmlFor="rider-store" className="visually-hidden">Store</label>
+          <select id="rider-store" className="select" value={storeId}
+            onChange={(e) => setStoreId(Number(e.target.value))}>
+            {stores.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <button className="btn btn-dark" disabled={add.isPending || !email.trim()}>
+            {add.isPending ? 'Adding…' : 'Make rider'}
+          </button>
+        </form>
+        {add.isError && <ErrorNote error={add.error} />}
+      </section>
+
+      {remove.isError && <ErrorNote error={remove.error} />}
+      {riders.isPending ? (
+        <Spinner label="Loading riders" />
+      ) : riders.isError ? (
+        <ErrorNote error={riders.error} onRetry={() => riders.refetch()} />
+      ) : riders.data.length === 0 ? (
+        <Empty title="No riders yet"><p>Add someone above to start delivering.</p></Empty>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Rider</th>
+                <th>Store</th>
+                <th className="num">On the way</th>
+                <th className="num">Delivered today</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {riders.data.map((r) => (
+                <tr key={r.id}>
+                  <td><strong>{r.name}</strong><div className="muted small">{r.email}</div></td>
+                  <td>{r.store_name}</td>
+                  <td className="num">{r.on_the_way}</td>
+                  <td className="num">{r.delivered_today}</td>
+                  <td>
+                    <button className="btn btn-sm btn-ghost" disabled={remove.isPending}
+                      onClick={() => remove.mutate(r.id)}>
+                      Remove
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage } from '../api/client';
 import type { Order, OrderStatus } from '../api/types';
-import { formatDateTime, formatPaise, formatSlot, STATUS_LABEL } from '../lib/format';
+import { formatCountdown, formatDateTime, formatPaise, formatSlot, paymentLabel, STATUS_LABEL } from '../lib/format';
+import { usePayment } from '../features/payments/PaymentProvider';
 import { Empty, ErrorNote, Spinner } from '../components/Feedback';
 
 export function StatusBadge({ status }: { status: OrderStatus }) {
@@ -63,6 +65,20 @@ export function OrderDetailPage() {
     queryFn: () => api<Order>(`/orders/${id}`),
   });
 
+  const { pay } = usePayment();
+  const payNow = useMutation({
+    mutationFn: () => pay(id!),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['orders'] }),
+  });
+  const secondsLeft = useSecondsUntil(order.data?.payment_expires_at ?? null);
+  // When the payment window runs out, refetch: the server cancels the order soon after
+  useEffect(() => {
+    if (secondsLeft === 0) {
+      const t = setTimeout(() => qc.invalidateQueries({ queryKey: ['orders', id] }), 35_000);
+      return () => clearTimeout(t);
+    }
+  }, [secondsLeft, qc, id]);
+
   const cancel = useMutation({
     mutationFn: () => api<{ status: OrderStatus }>(`/orders/${id}/cancel`, { method: 'POST' }),
     onSuccess: () => {
@@ -85,11 +101,16 @@ export function OrderDetailPage() {
 
   const o = order.data;
   const stepIndex = STEPS.indexOf(o.status);
-  const canCancel = o.status === 'PLACED' || o.status === 'PACKED';
+  const canCancel = o.status === 'PENDING_PAYMENT' || o.status === 'PLACED' || o.status === 'PACKED';
 
   return (
     <div className="page medium">
-      {justPlaced && o.status === 'PLACED' && (
+      {justPlaced && o.status === 'PLACED' && o.payment_status === 'paid' && (
+        <div className="notice success" role="status">
+          Paid. Your order arrives between {formatSlot(o.slot_start, o.slot_end)}.
+        </div>
+      )}
+      {justPlaced && o.status === 'PLACED' && o.payment_status !== 'paid' && (
         <div className="notice success" role="status">
           Order placed. It will arrive between {formatSlot(o.slot_start, o.slot_end)}.
         </div>
@@ -103,9 +124,33 @@ export function OrderDetailPage() {
         <StatusBadge status={o.status} />
       </div>
 
+      {o.status === 'PENDING_PAYMENT' && (
+        <div className="notice pay-notice" role="status">
+          <strong>Waiting for your payment.</strong>{' '}
+          {secondsLeft !== null && secondsLeft > 0
+            ? <>Your items are held for <span className="countdown">{formatCountdown(secondsLeft)}</span> more. After that the order is cancelled and they go back on the shelf.</>
+            : 'The time to pay has run out; this order will be cancelled in a moment.'}
+          {payNow.isError && <p className="error small">{errorMessage(payNow.error)}</p>}
+          {secondsLeft !== null && secondsLeft > 0 && (
+            <div className="actions">
+              <button className="btn btn-primary" onClick={() => payNow.mutate()} disabled={payNow.isPending}>
+                {payNow.isPending ? 'Opening payment…' : `Pay ${formatPaise(o.total_paise)} now`}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {o.status === 'CANCELLED' ? (
-        <div className="notice">This order was cancelled. Nothing will be delivered or charged.</div>
-      ) : (
+        <div className="notice">
+          This order was cancelled. Nothing will be delivered.{' '}
+          {o.payment_status === 'refunded'
+            ? `${formatPaise(o.total_paise)} has been refunded.`
+            : o.payment_status === 'refund_pending'
+              ? `A refund of ${formatPaise(o.total_paise)} is on its way.`
+              : 'You haven’t been charged.'}
+        </div>
+      ) : o.status === 'PENDING_PAYMENT' ? null : (
         <ol className="progress" aria-label="Order progress">
           {STEPS.map((s, i) => (
             <li key={s} className={i <= stepIndex ? 'done' : ''} aria-current={i === stepIndex ? 'step' : undefined}>
@@ -124,6 +169,20 @@ export function OrderDetailPage() {
           <div className="muted small">Address</div>
           <div style={{ fontWeight: 600 }}>{o.address}</div>
         </div>
+        <div className="stat">
+          <div className="muted small">Payment</div>
+          <div style={{ fontWeight: 600 }}>
+            {paymentLabel(o.payment_method, o.payment_status)}
+          </div>
+        </div>
+        {o.rider_name && (
+          <div className="stat">
+            <div className="muted small">Rider</div>
+            <div style={{ fontWeight: 600 }}>
+              {o.rider_name}{o.status === 'OUT_FOR_DELIVERY' ? ' is on the way' : ''}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="table-wrap">
@@ -172,4 +231,16 @@ export function OrderDetailPage() {
       </p>
     </div>
   );
+}
+
+/** Seconds until `iso`, ticking every second; null when there's no deadline. */
+function useSecondsUntil(iso: string | null): number | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!iso) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [iso]);
+  if (!iso) return null;
+  return Math.max(0, Math.round((new Date(iso).getTime() - now) / 1000));
 }

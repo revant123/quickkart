@@ -3,8 +3,8 @@
 [![CI](https://github.com/revant123/quickkart/actions/workflows/ci.yml/badge.svg)](https://github.com/revant123/quickkart/actions/workflows/ci.yml)
 
 A multi-store quick-commerce platform, inspired by 10-minute grocery delivery apps.
-Customers order from their nearest dark store and pick a 30-minute delivery slot; store
-staff manage stock, slots and orders. Built to show what goes wrong when many people
+Customers find the dark store that delivers to them, pick a 30-minute delivery slot, and pay
+online (Razorpay) or in cash; store staff pack orders and riders deliver them. Built to show what goes wrong when many people
 buy the same thing at once, and how to prevent it.
 
 ![The QuickKart shop](docs/images/shop.png)
@@ -16,6 +16,15 @@ PostgreSQL 18 · Redis · Docker Compose · nginx · Vitest · k6
 
 - **Shop**: browse 50,000 products across 3 stores, search, filter by aisle, cart, checkout
   with delivery slots, order history, cancel before dispatch. Works on phones.
+- **Location**: find the store that delivers to you by GPS or pincode (7 km radius); saved
+  addresses with one default; checkout refuses addresses a store can't reach.
+- **Payments**: pay online with Razorpay (test mode) or cash on delivery. Unpaid orders
+  release their stock after 15 minutes; money for a cancelled order is refunded automatically.
+- **Accounts**: email verification, password reset by email, "log out of all devices".
+- **Notifications**: emails and SMS for every step (placed, on its way with the rider's name,
+  delivered, cancelled, refunded), sent through a transactional outbox with retries.
+- **Riders**: a phone-friendly Deliveries page; riders pick up packed orders (one rider per
+  order, even if five tap at once), get directions, mark delivered and cash collected.
 - **Live**: stock, "only 3 left" warnings, delivery-slot places and order status update on
   screen the moment they change, with no reload. If an item in your cart sells out, the
   cart tells you.
@@ -37,6 +46,14 @@ PostgreSQL 18 · Redis · Docker Compose · nginx · Vitest · k6
 |---|---|
 | ![Cart warns the item just sold out](docs/images/live-sold-out.png) | ![Admin stock with photo upload](docs/images/admin-stock.png) |
 
+| Nearest store by pincode or GPS | Waiting for payment, items held |
+|---|---|
+| ![Location picker](docs/images/location.png) | ![Order awaiting payment](docs/images/awaiting-payment.png) |
+
+| Rider's phone | Every email and SMS, in the test inbox |
+|---|---|
+| ![Rider deliveries page](docs/images/rider.png) | ![Mailpit inbox](docs/images/inbox.png) |
+
 ## Engineering challenges solved
 
 | Problem | What could go wrong | Solution | Proof |
@@ -52,6 +69,10 @@ PostgreSQL 18 · Redis · Docker Compose · nginx · Vitest · k6
 | Password guessing and abuse | Bots hammer login or checkout | Rate limits shared across containers via Redis; 429 with `RateLimit` headers | [security tests](api/test/security.test.ts) |
 | Sessions can't be revoked | A stolen token or a removed admin keeps working | Token version + role checked against the database on every request; "log out everywhere" | security tests |
 | Changing the schema of a live database | Editing tables by hand on each machine | Numbered migrations applied at start-up under an advisory lock | [migrations](api/migrations/) |
+| Paying online without overselling or blocking | Stock locked while a gateway responds; a closed tab loses a paid order | Reserve in one transaction (`PENDING_PAYMENT`), call the gateway outside it, confirm by HMAC signature AND webhook (deduplicated), expire after 15 min, refund late money | [payment tests](api/test/payments.test.ts), [ADR 0008](docs/adr/0008-online-payments-pending-order-webhook-expiry-refund.md) |
+| Emails that lie | "Order placed" sent for an order that rolled back, or never sent | Transactional outbox: message saved in the same transaction, sent by a job with retries | [outbox tests](api/test/outbox.test.ts), [ADR 0009](docs/adr/0009-notifications-through-a-transactional-outbox.md) |
+| Two riders, one order | Five riders tap "Pick up" together | Conditional `UPDATE ... WHERE status = 'PACKED' AND rider_id IS NULL`: exactly one wins | [rider tests](api/test/rider.test.ts) |
+| Delivering too far | A Mohali store accepts a Zirakpur address | Haversine distance in SQL, checked at checkout (and in the browser first) | [location tests](api/test/location.test.ts) |
 
 ### The race condition, live
 
@@ -92,6 +113,8 @@ flowchart LR
   api -.->|"catalog cache, rate limits"| redis[("Redis")]
   db -.->|"NOTIFY on commit"| api
   api -.->|"live updates (SSE)"| browser
+  api -.->|"emails, SMS (outbox)"| mail["Mailpit / Resend"]
+  api <-->|"payments, webhooks"| rzp["Razorpay"]
 ```
 
 More diagrams (data model, checkout sequence, order state machine): [docs/architecture.md](docs/architecture.md).
@@ -107,8 +130,14 @@ cp .env.example .env
 docker compose up -d --build
 docker compose exec -T db psql -U quickkart -d quickkart < db/seed/seed.sql   # sample data, once
 ```
-Open **http://localhost:8080**. To use the admin area, register on the site, then run
-`bash scripts/make-admin.sh you@example.com` and refresh the page.
+Open **http://localhost:8080**. Register, then open the test inbox at **http://localhost:8025**
+and click the "Confirm your email" link. To use the admin area, run
+`bash scripts/make-admin.sh you@example.com` and refresh the page. Riders are added from
+Admin → Riders.
+
+Online payments use QuickKart's built-in test gateway until you put Razorpay **test** keys in
+`.env` (`RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`); then Razorpay's real window opens. Pay with
+UPI id `success@razorpay`.
 
 | Service | Role | Reachable at |
 |---|---|---|
@@ -116,6 +145,7 @@ Open **http://localhost:8080**. To use the admin area, register on the site, the
 | api | Express API; scale with `docker compose up -d --scale api=3` | only through nginx |
 | db | PostgreSQL 18, data in the `pgdata` volume | localhost:5432 |
 | redis | catalog cache, shared rate-limit counters | inside Docker only |
+| mailpit | catches every email and SMS | http://localhost:8025 |
 | k6 | load tester | `bash scripts/load-test.sh catalog` or `checkout` |
 
 ### For development (live reload)
@@ -136,7 +166,7 @@ Wipe all data and reload the samples: `bash scripts/reset-data.sh`.
 
 ```bash
 docker compose --profile test up -d db-test   # throwaway test database
-cd api && npm test                            # 81 API tests: auth, catalog, checkout, orders, admin, live, images, security
+cd api && npm test                            # 132 API tests: checkout, payments, riders, outbox, accounts, live, ...
 cd web && npm test                            # cart logic
 ```
 Concurrency tests fire 10 simultaneous requests and check the database afterwards.
@@ -172,6 +202,18 @@ Redis tests run when a Redis is available: `TEST_REDIS_URL=redis://localhost:638
 | GET | /api/admin/live | admin | 200 (event stream) | 401, 403 |
 | GET | /api/products/:id/image | – | 200 | 404 |
 | POST, DELETE | /api/admin/products/:id/image (multipart `image`) | admin | 201, 200 | 403, 404, 413, 415 |
+| GET | /api/stores/nearest?pincode= or ?lat=&lng= | – | 200 | 400, 404 |
+| GET | /api/pincodes/:pincode | – | 200 | 400, 404 |
+| GET, POST | /api/me/addresses | user | 200, 201 | 400, 404, 409 |
+| PATCH, DELETE | /api/me/addresses/:id | user | 200, 204 | 400, 404 |
+| POST | /api/auth/verify-email, /resend-verification | –, user | 200, 202 | 400, 409 |
+| POST | /api/auth/forgot-password, /reset-password | – | 202, 204 | 400 |
+| POST | /api/orders/:id/payment | owner | 200 | 404, 409, 502 |
+| POST | /api/orders/:id/payment/verify | owner | 200 | 400, 404, 409 |
+| POST | /api/payments/razorpay/webhook | Razorpay (signed) | 200 | 400 |
+| GET | /api/rider/orders, /api/rider/live | rider | 200 | 401, 403 |
+| POST | /api/rider/orders/:id/pickup, /deliver | rider | 200 | 404, 409 |
+| GET, POST, DELETE | /api/admin/riders | admin | 200, 204 | 403, 404, 409 |
 
 401 = not logged in; 403 = logged in but not allowed; 404 for someone else's order (doesn't
 reveal that it exists); 409 = valid request that conflicts with current state; 429 = rate limited.
@@ -187,6 +229,10 @@ api/src/
   modules/orders     checkout (placeOrder.ts), history, cancel
   modules/admin      inventory, slots, order status, reports
   modules/images     product photos: upload (checked by file bytes), serve with cache headers
+  modules/payments   Razorpay + built-in test gateway, verify, webhook, expiry and refund jobs
+  modules/location   nearest store (haversine in SQL), pincodes, saved addresses
+  modules/rider      rider board, race-safe pickup, delivery
+  notifications/     transactional outbox, email and SMS templates, sender job
   db.ts              pool, withTransaction, withRetry
   cache.ts           Redis cache-aside with safe fallback
   live.ts            pg_notify / LISTEN / Server-Sent Events
@@ -205,8 +251,7 @@ docs/                architecture, ADRs, performance, scaling
 
 ## What I'd do next
 
-- Online payments with Razorpay (order `PENDING_PAYMENT` → `PLACED` on verified payment).
-- Order emails and SMS through a transactional outbox; email verification and password reset.
-- Nearest store from GPS or pincode; saved addresses; a delivery-rider role.
-- Deploy publicly with HTTPS.
+- Deploy publicly with HTTPS (Render), so Razorpay webhooks can reach it.
+- A real SMS provider; reconcile with Razorpay before expiring an order.
+- Automatic rider assignment from live rider locations.
 - Split hot stock into buckets for flash sales ([scaling.md](docs/scaling.md)).

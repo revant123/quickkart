@@ -60,7 +60,10 @@ export function LoginPage() {
             {emailError && <span id="email-error" className="error">{emailError}</span>}
           </div>
           <div className="field">
-            <label htmlFor="password">Password</label>
+            <div className="label-row">
+              <label htmlFor="password">Password</label>
+              <Link to="/forgot-password" className="small">Forgot password?</Link>
+            </div>
             <input
               id="password"
               className="input"
@@ -109,7 +112,7 @@ export function RegisterPage() {
     if (!valid) return;
     register.mutate(
       { name: name.trim(), email, password },
-      { onSuccess: () => navigate(returnTo, { replace: true }) },
+      { onSuccess: () => navigate(returnTo, { replace: true, state: { registered: true } }) },
     );
   };
 

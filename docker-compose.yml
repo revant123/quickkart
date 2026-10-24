@@ -3,7 +3,8 @@
 #
 # Inside Compose, services find each other by NAME on a private network:
 # the API connects to "db:5432" and "redis:6379"; nginx forwards to "api:4000".
-# Only nginx (8080) and PostgreSQL (5432, for your tools) are published.
+# Published: nginx (8080, the shop), PostgreSQL (5432, for your tools) and
+# Mailpit (8025, the test inbox where every email and SMS lands).
 
 services:
   # ---- PostgreSQL: the single source of truth --------------------------------
@@ -48,13 +49,32 @@ services:
       # Caching is ON by default. Turn it off for a load-test comparison with:
       #   REDIS_URL= docker compose up -d api
       REDIS_URL: ${REDIS_URL-redis://redis:6379}
+      # Links in emails point at the shop
+      APP_URL: http://localhost:8080
+      # Every email and SMS goes to Mailpit: open http://localhost:8025 to read them
+      SMTP_URL: smtp://mailpit:1025
+      REQUIRE_VERIFIED_EMAIL: ${REQUIRE_VERIFIED_EMAIL:-true}
+      # Razorpay TEST keys from the root .env. Empty = QuickKart's built-in test gateway.
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
     depends_on:
       db:
         condition: service_healthy     # wait until PostgreSQL accepts connections
       redis:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     restart: unless-stopped
     # no "ports": only nginx can reach the API
+
+  # ---- Mailpit: a fake mail server with a web inbox (nothing leaves your laptop)
+  mailpit:
+    image: axllent/mailpit:v1.32.0
+    ports:
+      - "8025:8025"          # inbox in the browser: http://localhost:8025
+      - "1025:1025"          # SMTP, so npm run dev can send here too
+    restart: unless-stopped
 
   # ---- nginx: serves the React app and forwards /api to the API --------------
   web:

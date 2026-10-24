@@ -8,7 +8,9 @@ import { Spinner } from '../../components/Feedback';
  * This is for convenience only: the SERVER is the real gatekeeper. Hiding a page
  * here does not secure anything; the API returns 401/403 regardless.
  */
-export function RequireAuth({ children, admin = false }: { children: ReactNode; admin?: boolean }) {
+export function RequireAuth({
+  children, admin = false, rider = false,
+}: { children: ReactNode; admin?: boolean; rider?: boolean }) {
   const me = useMe();
   const location = useLocation();
 
@@ -21,6 +23,14 @@ export function RequireAuth({ children, admin = false }: { children: ReactNode; 
         <p className="muted">
           This area is for store staff. Your account ({me.data.email}) is a customer account.
         </p>
+      </div>
+    );
+  }
+  if (rider && me.data.role !== 'rider') {
+    return (
+      <div className="page narrow">
+        <h1>Riders only</h1>
+        <p className="muted">This page is for delivery riders. Ask a store admin to add you as a rider.</p>
       </div>
     );
   }

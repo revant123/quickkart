@@ -4,11 +4,16 @@ import { api } from '../../api/client';
 import type { Store } from '../../api/types';
 import { readStorage, writeStorage } from '../../lib/storage';
 
+/** Where the customer said they are: from GPS or a pincode. */
+export type DeliveryLocation = { label: string; lat: number; lng: number; pincode: string | null };
+
 type StoreCtx = {
   stores: Store[];
   storeId: number | null;
   store: Store | undefined;
   setStoreId: (id: number) => void;
+  location: DeliveryLocation | null;
+  setLocation: (l: DeliveryLocation) => void;
 };
 
 const Ctx = createContext<StoreCtx | null>(null);
@@ -30,10 +35,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setStoreIdState(id);
     writeStorage('qk.store', id);
   };
+  const [location, setLocationState] = useState<DeliveryLocation | null>(() => readStorage('qk.location', null));
+  const setLocation = (l: DeliveryLocation) => {
+    setLocationState(l);
+    writeStorage('qk.location', l);
+  };
 
   return (
     <Ctx.Provider
-      value={{ stores, storeId, store: stores.find((s) => Number(s.id) === storeId), setStoreId }}
+      value={{
+        stores, storeId, store: stores.find((s) => Number(s.id) === storeId), setStoreId, location, setLocation,
+      }}
     >
       {children}
     </Ctx.Provider>

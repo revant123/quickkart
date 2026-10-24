@@ -5,9 +5,11 @@ import { RequireAuth } from './features/auth/RequireAuth';
 import { ShopPage } from './pages/ShopPage';
 import { LoginPage, RegisterPage } from './pages/AuthPages';
 import { CheckoutPage } from './pages/CheckoutPage';
+import { AccountPage, ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage } from './pages/AccountPages';
+import { RiderPage } from './pages/RiderPage';
 import { OrderDetailPage, OrdersPage } from './pages/OrderPages';
 import {
-  AdminInventoryPage, AdminLayout, AdminOrdersPage, AdminReportsPage, AdminSlotsPage,
+  AdminInventoryPage, AdminLayout, AdminOrdersPage, AdminReportsPage, AdminRidersPage, AdminSlotsPage,
 } from './pages/admin/AdminPages';
 
 export function App() {
@@ -20,6 +22,11 @@ export function App() {
           <Route path="/" element={<ShopPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/account" element={<RequireAuth><AccountPage /></RequireAuth>} />
+          <Route path="/rider" element={<RequireAuth rider><RiderPage /></RequireAuth>} />
           <Route path="/checkout" element={<RequireAuth><CheckoutPage /></RequireAuth>} />
           <Route path="/orders" element={<RequireAuth><OrdersPage /></RequireAuth>} />
           <Route path="/orders/:id" element={<RequireAuth><OrderDetailPage /></RequireAuth>} />
@@ -27,6 +34,7 @@ export function App() {
             <Route index element={<AdminOrdersPage />} />
             <Route path="inventory" element={<AdminInventoryPage />} />
             <Route path="slots" element={<AdminSlotsPage />} />
+            <Route path="riders" element={<AdminRidersPage />} />
             <Route path="reports" element={<AdminReportsPage />} />
           </Route>
           <Route

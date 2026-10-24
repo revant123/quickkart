@@ -28,12 +28,17 @@ flowchart LR
     web["web: nginx<br/>serves the React build<br/>forwards /api"]
     api["api: Express 5 + TypeScript<br/>stateless, scale with --scale api=N"]
     db[("db: PostgreSQL 18<br/>stock, slots, orders,<br/>idempotency keys")]
-    redis[("redis<br/>catalog cache only")]
+    redis[("redis<br/>catalog cache,<br/>rate-limit counters")]
+    mailpit["mailpit<br/>test inbox :8025"]
   end
+  razorpay["Razorpay<br/>(test mode)"]
   browser -->|"HTTP :8080"| web
   web -->|"/api/* to api:4000"| api
   api -->|"SQL, pooled connections"| db
   api -.->|"cache-aside, 30 s TTL"| redis
+  api -.->|"outbox job: emails, SMS"| mailpit
+  api <-->|"orders, refunds / webhooks"| razorpay
+  browser -.->|"payment window"| razorpay
 ```
 
 - **Only nginx is public.** The API has no published port; nginx reaches it by its service
@@ -139,10 +144,13 @@ Why each step is safe:
 
 ```mermaid
 stateDiagram-v2
-  [*] --> PLACED: checkout
+  [*] --> PLACED: checkout, cash on delivery
+  [*] --> PENDING_PAYMENT: checkout, pay online
+  PENDING_PAYMENT --> PLACED: payment verified (browser or webhook)
+  PENDING_PAYMENT --> CANCELLED: not paid in 15 min (job), or customer
   PLACED --> PACKED: admin
-  PACKED --> OUT_FOR_DELIVERY: admin
-  OUT_FOR_DELIVERY --> DELIVERED: admin
+  PACKED --> OUT_FOR_DELIVERY: rider picks up (or admin)
+  OUT_FOR_DELIVERY --> DELIVERED: rider (or admin)
   PLACED --> CANCELLED: customer or admin
   PACKED --> CANCELLED: customer or admin
   DELIVERED --> [*]
@@ -153,7 +161,32 @@ Allowed "from" states are checked inside the UPDATE (`WHERE status = ANY(allowed
 admins clicking at once can't skip a step. Cancelling returns the stock and the slot place
 in the same transaction, exactly once.
 
-## 6. Code layout
+## 6. Paying online
+
+```mermaid
+sequenceDiagram
+  participant B as Browser
+  participant A as API
+  participant D as PostgreSQL
+  participant R as Razorpay
+  B->>A: POST /orders {paymentMethod: online}
+  A->>D: ONE transaction: take stock, book slot, order PENDING_PAYMENT
+  A-->>B: 201 orderId (items held 15 min)
+  B->>A: POST /orders/:id/payment
+  A->>R: create order (amount, receipt)
+  A-->>B: key + Razorpay order id
+  B->>R: customer pays in Razorpay's window
+  R-->>B: payment id + signature
+  B->>A: POST /orders/:id/payment/verify
+  A->>A: HMAC(order_id|payment_id, secret) matches?
+  A->>D: payment paid, order PLACED, outbox: "order placed" email + SMS
+  R-)A: webhook payment.captured (same effect, deduplicated)
+```
+
+If nobody pays, the expiry job cancels the order and the stock goes back. If money arrives
+for a cancelled order, the refund job pays it back. Details: [ADR 0008](adr/0008-online-payments-pending-order-webhook-expiry-refund.md).
+
+## 7. Code layout
 
 | Folder | Responsibility |
 |---|---|
@@ -161,10 +194,14 @@ in the same transaction, exactly once.
 | `api/src/modules/catalog` | stores, aisles, slots, product search with keyset pagination |
 | `api/src/modules/orders` | checkout (`placeOrder.ts`), history, cancel |
 | `api/src/modules/admin` | inventory, slots, order status, reports |
+| `api/src/modules/payments` | gateways (Razorpay, built-in test), verify, webhook, expiry and refund jobs |
+| `api/src/modules/location` | nearest store, pincodes, saved addresses |
+| `api/src/modules/rider` | rider board, race-safe pickup, delivery; admin rider management |
+| `api/src/notifications` | transactional outbox, email/SMS templates, sender job |
 | `api/src/db.ts` | connection pool, `withTransaction`, `withRetry` |
 | `api/src/cache.ts` | Redis cache-aside with versioned keys and safe fallback |
-| `web/src/features` | auth, store picker, cart (reducer + context) |
-| `web/src/pages` | shop, checkout, orders, admin dashboard |
+| `web/src/features` | auth, location picker, addresses, payments, cart, live updates |
+| `web/src/pages` | shop, checkout, orders, account, rider, admin dashboard |
 
 These module boundaries are where the monolith could be split later if one part ever needs
 to scale or deploy on its own. See [scaling.md](scaling.md) and [ADRs](adr/).
