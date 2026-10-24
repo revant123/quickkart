@@ -1,6 +1,7 @@
 import { pool, withTransaction, withRetry } from '../../db.js';
 import { HttpError } from '../../errors.js';
 import { notifyLive, type StockItem } from '../../live.js';
+import { notifyOrder } from '../../notifications/outbox.js';
 
 /**
  * Orders with their items folded into one JSON array (json_agg), so the API
@@ -8,8 +9,10 @@ import { notifyLive, type StockItem } from '../../live.js';
  * GROUP BY o.id lets us select every orders column because id is its primary key.
  */
 const ORDER_SELECT = `
-  SELECT o.id, o.status, o.total_paise, o.address, o.created_at,
+  SELECT o.id, o.status, o.total_paise, o.address, o.phone, o.created_at,
          o.store_id, s.name AS store_name,
+         o.payment_method, o.payment_status, o.payment_expires_at,
+         o.picked_up_at, o.delivered_at, r.name AS rider_name,
          ds.starts_at AS slot_start, ds.ends_at AS slot_end,
          json_agg(json_build_object(
            'productId', oi.product_id, 'name', p.name, 'unit', p.unit,
@@ -19,9 +22,10 @@ const ORDER_SELECT = `
     JOIN stores s          ON s.id = o.store_id
     JOIN delivery_slots ds ON ds.id = o.slot_id
     JOIN order_items oi    ON oi.order_id = o.id
-    JOIN products p        ON p.id = oi.product_id`;
+    JOIN products p        ON p.id = oi.product_id
+    LEFT JOIN users r      ON r.id = o.rider_id`;
 
-const ORDER_GROUP = `GROUP BY o.id, s.name, ds.starts_at, ds.ends_at`;
+const ORDER_GROUP = `GROUP BY o.id, s.name, ds.starts_at, ds.ends_at, r.name`;
 
 /** A customer's most recent orders (uses index idx_orders_user_time). */
 export async function listOrdersForUser(userId: number) {
@@ -51,23 +55,38 @@ export async function getOrder(orderId: number, userId?: number) {
   return rows[0];
 }
 
+export type CancelReason = 'customer' | 'store' | 'payment_expired';
+
 /**
  * Cancels an order and gives back its stock and slot place, all-or-nothing.
- * Only PLACED or PACKED orders can be cancelled.
+ * Orders can be cancelled until they leave the store (PENDING_PAYMENT, PLACED, PACKED).
  *
  * Double-cancel safety: the status UPDATE locks the order row. A second,
- * concurrent cancel waits, then re-checks "status IN ('PLACED','PACKED')",
- * finds CANCELLED, matches nothing, and gets 409. Stock is returned once.
+ * concurrent cancel waits, then re-checks the status, finds CANCELLED, matches
+ * nothing, and gets 409. Stock is returned once.
+ *
+ * Money: a paid online order becomes refund_pending (the refund job pays it back);
+ * an unpaid online order's payment is marked failed.
+ *
+ * reason 'payment_expired' (the expiry job) only cancels orders still waiting for
+ * payment after their deadline. If the payment lands at the same moment, whichever
+ * UPDATE locks the row first wins, and the other one matches nothing.
  */
-export function cancelOrder(orderId: number, userId?: number) {
+export function cancelOrder(orderId: number, opts: { userId?: number; reason: CancelReason }) {
+  const { userId, reason } = opts;
+  const expiring = reason === 'payment_expired';
   return withRetry(() =>
     withTransaction(async (db) => {
       const { rows } = await db.query(
-        `UPDATE orders SET status = 'CANCELLED'
+        `UPDATE orders SET status = 'CANCELLED',
+                payment_status = CASE payment_status WHEN 'paid' THEN 'refund_pending'
+                                                     WHEN 'pending' THEN 'failed'
+                                                     ELSE payment_status END
           WHERE id = $1 AND ($2::bigint IS NULL OR user_id = $2)
-            AND status IN ('PLACED', 'PACKED')
-          RETURNING id, store_id, slot_id, user_id`,
-        [orderId, userId ?? null],
+            AND status = ANY($3::text[])
+            AND (NOT $4 OR payment_expires_at < now())
+          RETURNING id, store_id, slot_id, user_id, payment_status, total_paise`,
+        [orderId, userId ?? null, expiring ? ['PENDING_PAYMENT'] : ['PENDING_PAYMENT', 'PLACED', 'PACKED'], expiring],
       );
       const order = rows[0];
       if (!order) {
@@ -99,6 +118,12 @@ export function cancelOrder(orderId: number, userId?: number) {
         if (r.rows[0]) stockAfter.push({ productId: Number(it.product_id), stock: r.rows[0].stock });
       }
 
+      const refunding = order.payment_status === 'refund_pending';
+      await notifyOrder(db, order.id, 'order_cancelled', {
+        reason,
+        refundPaise: refunding ? order.total_paise : null,
+      });
+
       // Live updates, sent only if this transaction commits
       const storeId = Number(order.store_id);
       await notifyLive(db, { type: 'stock', storeId, items: stockAfter });
@@ -106,7 +131,7 @@ export function cancelOrder(orderId: number, userId?: number) {
       await notifyLive(db, {
         type: 'order', storeId, userId: Number(order.user_id), orderId: Number(order.id), status: 'CANCELLED',
       });
-      return { id: String(order.id), status: 'CANCELLED' };
+      return { id: String(order.id), status: 'CANCELLED', paymentStatus: order.payment_status as string };
     }),
   );
 }

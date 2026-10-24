@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { withTransaction, withRetry } from '../../db.js';
 import { HttpError } from '../../errors.js';
 import { notifyLive, type StockItem } from '../../live.js';
+import { config } from '../../config.js';
+import { assertDelivers } from '../location/geo.js';
+import { notifyOrder } from '../../notifications/outbox.js';
 
 // ---------------------------------------------------------------------------
 // The checkout. Solves three engineering challenges in ONE transaction:
@@ -15,7 +18,12 @@ import { notifyLive, type StockItem } from '../../live.js';
 export const CheckoutBody = z.object({
   storeId: z.number().int().positive(),
   slotId: z.number().int().positive(),
-  address: z.string().trim().min(5).max(300),
+  // A saved address (checked against the store's delivery area)...
+  addressId: z.number().int().positive().optional(),
+  // ...or, for API clients and the load tests, free text with no area check
+  address: z.string().trim().min(5).max(300).optional(),
+  // cod: pay the rider in cash · online: pay now (order waits in PENDING_PAYMENT)
+  paymentMethod: z.enum(['cod', 'online']).default('cod'),
   items: z
     .array(
       z.object({
@@ -26,12 +34,21 @@ export const CheckoutBody = z.object({
     .min(1)
     .max(50),
   // Any other field the client sends (e.g. a fake "price") is stripped by Zod.
+}).refine((b) => b.addressId !== undefined || b.address !== undefined, {
+  message: 'addressId or address is required',
+  path: ['addressId'],
 });
 export type CheckoutInput = z.infer<typeof CheckoutBody>;
 
 export type CheckoutResult = {
   status: number;
-  body: { orderId: string; status: string; totalPaise: number };
+  body: {
+    orderId: string;
+    status: string;
+    totalPaise: number;
+    paymentMethod: 'cod' | 'online';
+    paymentExpiresAt: string | null;
+  };
   replay: boolean;
 };
 
@@ -48,7 +65,8 @@ function normaliseItems(items: CheckoutInput['items']) {
     .sort((a, b) => a.productId - b.productId);
 }
 
-export function placeOrder(userId: number, key: string, input: CheckoutInput) {
+export function placeOrder(userId: number, key: string, rawInput: z.input<typeof CheckoutBody>) {
+  const input: CheckoutInput = CheckoutBody.parse(rawInput); // applies defaults (cash on delivery)
   // Fingerprint of the request, to detect the same key reused with a different body
   const requestHash = createHash('sha256').update(JSON.stringify(input)).digest('hex');
 
@@ -75,6 +93,25 @@ export function placeOrder(userId: number, key: string, input: CheckoutInput) {
           throw new HttpError(422, 'idempotency_key_reused');
         }
         return { status: saved.response_code, body: saved.response_body, replay: true };
+      }
+
+      // ---- 1b. Where is it going? A saved address must be the customer's own
+      // and inside the store's delivery area.
+      let delivery = { text: input.address ?? '', phone: null as string | null, lat: null as number | null, lng: null as number | null };
+      if (input.addressId !== undefined) {
+        const { rows: a } = await db.query(
+          'SELECT line1, line2, city, pincode, phone, lat, lng FROM addresses WHERE id = $1 AND user_id = $2',
+          [input.addressId, userId],
+        );
+        if (!a[0]) throw new HttpError(404, 'address_not_found');
+        await assertDelivers(db, input.storeId, a[0]);
+        delivery = {
+          // A COPY of the address: editing it later never changes this order
+          text: [a[0].line1, a[0].line2, `${a[0].city} ${a[0].pincode}`].filter(Boolean).join(', '),
+          phone: a[0].phone,
+          lat: a[0].lat,
+          lng: a[0].lng,
+        };
       }
 
       // ---- 2. Reserve a delivery slot (capacity-safe) --------------------
@@ -117,11 +154,19 @@ export function placeOrder(userId: number, key: string, input: CheckoutInput) {
       }
 
       // ---- 4. Create the order and its lines -----------------------------
+      // Online orders hold their stock and slot place for PAYMENT_EXPIRY_MINUTES.
+      // If payment doesn't arrive by then, a job cancels them and releases both.
+      const online = input.paymentMethod === 'online';
       const { rows: orderRows } = await db.query(
-        `INSERT INTO orders (user_id, store_id, slot_id, total_paise, address)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, status, total_paise`,
-        [userId, input.storeId, input.slotId, total, input.address],
+        `INSERT INTO orders (user_id, store_id, slot_id, total_paise, address, address_id, phone,
+                             delivery_lat, delivery_lng, payment_method, status, payment_status,
+                             payment_expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                 CASE WHEN $10 = 'online' THEN now() + make_interval(mins => $13) END)
+         RETURNING id, status, total_paise, payment_method, payment_expires_at`,
+        [userId, input.storeId, input.slotId, total, delivery.text, input.addressId ?? null, delivery.phone,
+          delivery.lat, delivery.lng, input.paymentMethod,
+          online ? 'PENDING_PAYMENT' : 'PLACED', online ? 'pending' : 'unpaid', config.PAYMENT_EXPIRY_MINUTES],
       );
       const order = orderRows[0];
       for (const l of lines) {
@@ -139,11 +184,17 @@ export function placeOrder(userId: number, key: string, input: CheckoutInput) {
         type: 'order', storeId: input.storeId, userId, orderId: Number(order.id), status: order.status,
       });
 
+      // Confirmation email + SMS, saved in the outbox with the order (sent after commit).
+      // Online orders get theirs when the payment arrives.
+      if (!online) await notifyOrder(db, order.id, 'order_placed');
+
       // ---- 5. Save the response with the key (commits with the order) ---
       const body = {
         orderId: String(order.id),
         status: order.status as string,
         totalPaise: order.total_paise as number,
+        paymentMethod: order.payment_method as 'cod' | 'online',
+        paymentExpiresAt: order.payment_expires_at ? new Date(order.payment_expires_at).toISOString() : null,
       };
       await db.query(
         `UPDATE idempotency_keys SET response_code = 201, response_body = $3

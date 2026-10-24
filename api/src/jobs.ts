@@ -77,4 +77,8 @@ export const cleanupIdempotencyKeys: Job = {
   },
 };
 
-export const ALL_JOBS: Job[] = [cleanupIdempotencyKeys];
+// Jobs from other modules register here too
+import { sendOutbox } from './notifications/outbox.js';
+import { expireUnpaidOrders, processRefunds } from './modules/payments/service.js';
+
+export const ALL_JOBS: Job[] = [cleanupIdempotencyKeys, sendOutbox, expireUnpaidOrders, processRefunds];

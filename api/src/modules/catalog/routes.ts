@@ -12,7 +12,7 @@ const StoreId = z.coerce.number().int().positive();
 // GET /api/stores -> active stores
 catalogRouter.get('/stores', async (_req, res) => {
   const { rows } = await pool.query(
-    'SELECT id, name, city, pincode FROM stores WHERE is_active ORDER BY name',
+    'SELECT id, name, city, pincode, address, lat, lng, radius_km FROM stores WHERE is_active ORDER BY name',
   );
   res.json(rows);
 });

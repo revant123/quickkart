@@ -9,6 +9,9 @@ import { createOrdersRouter } from './modules/orders/routes.js';
 import { adminRouter } from './modules/admin/routes.js';
 import { adminImagesRouter, publicImagesRouter } from './modules/images/routes.js';
 import { requireAuth, requireRole } from './middleware/auth.js';
+import { addressesRouter, locationRouter } from './modules/location/routes.js';
+import { paymentsRouter, razorpayWebhook } from './modules/payments/routes.js';
+import { adminRidersRouter, riderRouter } from './modules/rider/routes.js';
 import { createLimiters, DEFAULT_LIMITS, noLimit, type RateLimits } from './middleware/rateLimit.js';
 
 export type AppOptions = {
@@ -27,6 +30,10 @@ export function buildApp(options: AppOptions = {}) {
   // the real client address from X-Forwarded-For (needed for per-IP rate limits)
   app.set('trust proxy', 1);
 
+  // The payment webhook needs the RAW body to check its signature, so it's
+  // registered before the JSON parser (which would consume and re-shape it).
+  app.use('/api/payments/razorpay/webhook', razorpayWebhook);
+
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
 
@@ -40,14 +47,22 @@ export function buildApp(options: AppOptions = {}) {
   });
 
   app.use('/api', limiter.api);
-  app.use(['/api/auth/login', '/api/auth/register'], limiter.auth);
+  app.use(
+    ['/api/auth/login', '/api/auth/register', '/api/auth/forgot-password', '/api/auth/reset-password',
+      '/api/auth/verify-email', '/api/auth/resend-verification'],
+    limiter.auth,
+  );
 
   app.use('/api/auth', authRouter);
+  app.use('/api', locationRouter); // before catalog: /stores/nearest isn't a store id
   app.use('/api', catalogRouter);
+  app.use('/api/me/addresses', addressesRouter);
+  app.use('/api/payments', paymentsRouter);
+  app.use('/api/rider', requireAuth, requireRole('rider'), riderRouter);
   app.use('/api', publicImagesRouter);
   app.use('/api/orders', createOrdersRouter(limiter.checkout));
   // Every admin route: must be logged in (401) AND be an admin (403)
-  app.use('/api/admin', requireAuth, requireRole('admin'), adminRouter, adminImagesRouter);
+  app.use('/api/admin', requireAuth, requireRole('admin'), adminRouter, adminImagesRouter, adminRidersRouter);
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'not_found' });

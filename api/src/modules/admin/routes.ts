@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { pool } from '../../db.js';
+import { pool, withTransaction } from '../../db.js';
+import { notifyOrder } from '../../notifications/outbox.js';
 import { HttpError } from '../../errors.js';
 import { cancelOrder, getOrder } from '../orders/queries.js';
 import { bumpCatalogVersion } from '../../cache.js';
@@ -144,7 +145,7 @@ adminRouter.post('/stores/:storeId/slots', async (req, res) => {
 // ORDERS
 // ===========================================================================
 
-const STATUSES = ['PLACED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'] as const;
+const STATUSES = ['PENDING_PAYMENT', 'PLACED', 'PACKED', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED'] as const;
 
 const OrdersQuery = z.object({
   storeId: z.coerce.number().int().positive().optional(),
@@ -157,11 +158,13 @@ adminRouter.get('/orders', async (req, res) => {
   const { rows } = await pool.query(
     `SELECT o.id, o.status, o.total_paise, o.created_at, o.store_id, s.name AS store_name,
             u.email AS customer_email, ds.starts_at AS slot_start,
+            o.payment_method, o.payment_status, r.name AS rider_name,
             (SELECT count(*)::int FROM order_items oi WHERE oi.order_id = o.id) AS item_count
        FROM orders o
        JOIN stores s          ON s.id = o.store_id
        JOIN users u           ON u.id = o.user_id
        JOIN delivery_slots ds ON ds.id = o.slot_id
+       LEFT JOIN users r      ON r.id = o.rider_id
       WHERE ($1::bigint IS NULL OR o.store_id = $1)
         AND ($2::text   IS NULL OR o.status = $2)
       ORDER BY o.created_at DESC, o.id DESC
@@ -195,21 +198,32 @@ adminRouter.patch('/orders/:id/status', async (req, res) => {
 
   // Cancelling also returns stock and the slot place, so it has its own transaction
   if (next === 'CANCELLED') {
-    res.json(await cancelOrder(orderId));
+    res.json(await cancelOrder(orderId, { reason: 'store' }));
     return;
   }
 
-  const { rows } = await pool.query(
-    `UPDATE orders SET status = $2
-      WHERE id = $1 AND status = ANY($3::text[])
-      RETURNING id, status, store_id, user_id`,
-    [orderId, next, ALLOWED_FROM[next]],
-  );
-  if (rows[0]) {
-    const o = rows[0];
-    await notifyLive(pool, {
-      type: 'order', storeId: Number(o.store_id), userId: Number(o.user_id), orderId: Number(o.id), status: o.status,
+  const o = await withTransaction(async (db) => {
+    // Delivered cash-on-delivery orders are paid: the rider collected the cash
+    const { rows } = await db.query(
+      `UPDATE orders SET status = $2,
+              picked_up_at = CASE WHEN $2 = 'OUT_FOR_DELIVERY' THEN now() ELSE picked_up_at END,
+              delivered_at = CASE WHEN $2 = 'DELIVERED' THEN now() ELSE delivered_at END,
+              payment_status = CASE WHEN $2 = 'DELIVERED' AND payment_method = 'cod' THEN 'paid'
+                                    ELSE payment_status END
+        WHERE id = $1 AND status = ANY($3::text[])
+        RETURNING id, status, store_id, user_id`,
+      [orderId, next, ALLOWED_FROM[next]],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    if (next === 'OUT_FOR_DELIVERY') await notifyOrder(db, row.id, 'order_out_for_delivery');
+    if (next === 'DELIVERED') await notifyOrder(db, row.id, 'order_delivered');
+    await notifyLive(db, {
+      type: 'order', storeId: Number(row.store_id), userId: Number(row.user_id), orderId: Number(row.id), status: row.status,
     });
+    return row;
+  });
+  if (o) {
     res.json({ id: o.id, status: o.status });
     return;
   }

@@ -14,10 +14,10 @@ INSERT INTO categories (name, slug) VALUES
   ('Dairy', 'dairy'), ('Fruits & Vegetables', 'fruits-vegetables'),
   ('Snacks', 'snacks'), ('Beverages', 'beverages'), ('Staples', 'staples');
 
-INSERT INTO stores (name, city, pincode) VALUES
-  ('QuickKart Central', 'Chandigarh', '160017'),
-  ('QuickKart North',   'Chandigarh', '160011'),
-  ('QuickKart East',    'Mohali',     '160062');
+INSERT INTO stores (name, city, pincode, address, lat, lng) VALUES
+  ('QuickKart Central', 'Chandigarh', '160017', 'Sector 17, Chandigarh', 30.7410, 76.7820),
+  ('QuickKart North',   'Chandigarh', '160011', 'Sector 11, Chandigarh', 30.7580, 76.7770),
+  ('QuickKart East',    'Mohali',     '160062', 'Phase 8, Mohali',       30.7000, 76.7200);
 
 -- 40 kinds of product (8 per aisle), each with fitting styles and pack sizes.
 -- 1,250 numbered variants of each = 50,000 products.

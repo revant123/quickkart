@@ -5,7 +5,8 @@ import { pool } from '../src/db.js';
 /** Empties every table so each test starts from a clean database. */
 export async function resetDb() {
   await pool.query(`TRUNCATE users, stores, categories, products, store_inventory,
-    delivery_slots, orders, order_items, idempotency_keys, product_images RESTART IDENTITY CASCADE`);
+    delivery_slots, orders, order_items, idempotency_keys, product_images, addresses,
+    payments, payment_events, user_tokens, outbox RESTART IDENTITY CASCADE`);
 }
 
 /** Registers a user and returns the session cookie to send with later requests. */
@@ -99,4 +100,30 @@ export function sessionCookie(res: request.Response): string {
   const found = raw?.find((c) => c.startsWith('session='));
   if (!found) throw new Error('no session cookie in response');
   return found.split(';')[0];
+}
+
+/** Gives the test stores real locations (seedShop leaves them blank) and adds pincodes. */
+export async function locateStores() {
+  await pool.query(`UPDATE stores SET lat = 30.7410, lng = 76.7820, radius_km = 7 WHERE id = 1;
+                    UPDATE stores SET lat = 30.7580, lng = 76.7770, radius_km = 7 WHERE id = 2;`);
+}
+
+/** Saves an address for the logged-in user and returns its id. Default: Sector 17. */
+export async function addAddress(app: Express, cookie: string, over: Record<string, unknown> = {}) {
+  const res = await request(app)
+    .post('/api/me/addresses')
+    .set('Cookie', cookie)
+    .send({ line1: '12, Sector 17-C', city: 'Chandigarh', pincode: '160017', phone: '9876543210', ...over });
+  if (res.status !== 201) throw new Error(`address failed: ${res.status} ${JSON.stringify(res.body)}`);
+  return Number(res.body.id);
+}
+
+/** Messages waiting in the outbox (optionally only one template). */
+export async function outbox(template?: string) {
+  const { rows } = await pool.query(
+    `SELECT channel, recipient, template, data, status FROM outbox
+      WHERE $1::text IS NULL OR template = $1 ORDER BY id`,
+    [template ?? null],
+  );
+  return rows as { channel: string; recipient: string; template: string; data: any; status: string }[];
 }

@@ -49,3 +49,6 @@ export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<
     }
   }
 }
+
+/** Anything you can run a query on: the pool, or a client inside a transaction. */
+export type Queryable = pg.Pool | pg.PoolClient;
