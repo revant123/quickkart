@@ -24,7 +24,7 @@ export function ProductTile({ product, storeId }: { product: Product; storeId: n
 
   return (
     <article className={`tile${product.in_stock ? '' : ' sold-out'}`}>
-      <div className={`swatch sw-${product.category}${product.image_url ? ' has-image' : ''}`} aria-hidden="true">
+      <div className={`swatch sw-${product.category}${imageClass(product.image_url)}`} aria-hidden="true">
         <span className="unit-tag">{product.unit}</span>
         {product.image_url ? (
           <img src={product.image_url} alt="" loading="lazy" decoding="async" />
@@ -55,4 +55,10 @@ export function ProductTile({ product, storeId }: { product: Product; storeId: n
       </div>
     </article>
   );
+}
+
+/** Drawings (.svg) sit inside the coloured tile; photos fill it edge to edge. */
+function imageClass(url: string | null): string {
+  if (!url) return '';
+  return url.endsWith('.svg') ? ' has-image' : ' has-image has-photo';
 }

@@ -7,6 +7,7 @@ import { LoginPage, RegisterPage } from './pages/AuthPages';
 import { CheckoutPage } from './pages/CheckoutPage';
 import { AccountPage, ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage } from './pages/AccountPages';
 import { RiderPage } from './pages/RiderPage';
+import { CreditsPage } from './pages/CreditsPage';
 import { OrderDetailPage, OrdersPage } from './pages/OrderPages';
 import {
   AdminInventoryPage, AdminLayout, AdminOrdersPage, AdminReportsPage, AdminRidersPage, AdminSlotsPage,
@@ -28,6 +29,7 @@ export function App() {
           <Route path="/account" element={<RequireAuth><AccountPage /></RequireAuth>} />
           <Route path="/rider" element={<RequireAuth rider><RiderPage /></RequireAuth>} />
           <Route path="/checkout" element={<RequireAuth><CheckoutPage /></RequireAuth>} />
+          <Route path="/credits" element={<CreditsPage />} />
           <Route path="/orders" element={<RequireAuth><OrdersPage /></RequireAuth>} />
           <Route path="/orders/:id" element={<RequireAuth><OrderDetailPage /></RequireAuth>} />
           <Route path="/admin" element={<RequireAuth admin><AdminLayout /></RequireAuth>}>
@@ -49,6 +51,9 @@ export function App() {
           />
         </Routes>
       </main>
+      <footer className="site-footer muted">
+        QuickKart is a student project. <Link to="/credits">Photo credits</Link>
+      </footer>
       <CartDrawer />
     </>
   );

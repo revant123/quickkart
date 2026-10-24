@@ -1123,6 +1123,62 @@ th.num {
   object-fit: contain;
   display: block;
 }
+.swatch.has-photo {
+  padding: 0;
+  background: var(--herb);
+}
+.swatch.has-photo img {
+  object-fit: cover;
+}
+.swatch.has-photo .unit-tag {
+  background: rgba(255, 255, 255, 0.9);
+  z-index: 1;
+}
+.tile.sold-out .swatch.has-photo img {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+
+/* ---------- footer, credits ---------- */
+
+.site-footer {
+  border-top: 1px solid var(--line);
+  margin-top: 48px;
+  padding: 20px 16px 32px;
+  text-align: center;
+  font-size: 0.85rem;
+}
+.site-footer a {
+  color: inherit;
+}
+.credits-list {
+  list-style: none;
+  padding: 0;
+  margin: 24px 0 0;
+  display: grid;
+  gap: 14px;
+}
+.credits-list li {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 14px;
+  align-items: center;
+}
+.credits-list img {
+  width: 72px;
+  height: 59px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--herb);
+}
+.credits-list .kind {
+  font-weight: 700;
+  text-transform: capitalize;
+}
+.credits-list p {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
 .photo-cell {
   display: flex;
   align-items: center;
