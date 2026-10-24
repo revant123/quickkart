@@ -1,88 +1,43 @@
 # QuickKart
 
-A scalable, multi-store quick-commerce platform inspired by Blinkit.
+A multi-store quick-commerce platform, inspired by 10-minute grocery delivery apps.
+Customers order from their nearest dark store and pick a 30-minute delivery slot; store
+staff manage stock, slots and orders. Built to show what goes wrong when many people
+buy the same thing at once, and how to prevent it.
 
-**Stack:** React + TypeScript · Node.js 24 + Express 5 · PostgreSQL 18 · Docker Compose · Redis · k6
+![The QuickKart shop](docs/images/shop.png)
 
-> Work in progress — this README grows as the project does.
+**Stack:** React + TypeScript (Vite, React Router, TanStack Query) · Node.js 24 + Express 5 ·
+PostgreSQL 18 · Redis · Docker Compose · nginx · Vitest · k6
 
-## Run it with Docker (one command)
+## What it does
 
-You need Docker Desktop and Git.
+- **Shop**: browse 50,000 products across 3 stores, search, filter by aisle, cart, checkout
+  with delivery slots, order history, cancel before dispatch. Works on phones.
+- **Admin**: move orders through packed → out for delivery → delivered, adjust stock and
+  prices, hide products, open delivery slots, see sales and best sellers.
 
-```bash
-cp .env.example .env
-docker compose up -d --build     # PostgreSQL, Redis, API, nginx
-docker compose exec -T db psql -U quickkart -d quickkart < db/seed/seed.sql   # sample data, once
-```
-Open **http://localhost:8080**. Run several API copies behind nginx with
-`docker compose up -d --scale api=3`.
+| Checkout | Order tracking |
+|---|---|
+| ![Checkout](docs/images/checkout.png) | ![Order page](docs/images/order.png) |
 
-| Service | What it is | Reachable at |
-|---|---|---|
-| web | nginx: serves the React app, forwards `/api` to the API | http://localhost:8080 |
-| api | Express API (stateless, can be scaled) | only through nginx |
-| db | PostgreSQL 18, data in the `pgdata` volume | localhost:5432 (for tools) |
-| redis | cache for catalog reads | only inside Docker |
-| k6 | load tester, on demand | `bash scripts/load-test.sh catalog` |
+| Admin: orders | Admin: sales |
+|---|---|
+| ![Admin orders](docs/images/admin-orders.png) | ![Admin sales](docs/images/admin-sales.png) |
 
-## Run it for development (live reload)
+## Engineering challenges solved
 
-You need Node.js 24, Docker Desktop and Git.
+| Problem | What could go wrong | Solution | Proof |
+|---|---|---|---|
+| Last item purchased twice | 10 people buy the last carton; all 10 succeed | Atomic conditional `UPDATE … WHERE stock >= qty` inside one transaction, fixed lock order | [race demo](api/test/race-demo.test.ts), [checkout tests](api/test/checkout.test.ts) |
+| Duplicate checkout requests | The phone retries after a timeout and the customer is charged twice | Idempotency keys, saved in the same transaction as the order | checkout tests 3–5 |
+| Too many delivery bookings | A slot for 5 gets 8 orders | Atomic `UPDATE … WHERE booked < capacity` + `CHECK (booked <= capacity)` | checkout test 2 |
+| Same product in different stores | Prices and stock differ per store | `store_inventory` junction table keyed by (store, product) | [schema](db/init/001_schema.sql) |
+| Slow product search | Every search scans 50,000 products | Trigram index (19 ms → 0.5 ms for a rare term), keyset pagination | [EXPLAIN script](db/queries/search-explain.sql) |
+| Repeated expensive reads | Popular searches sort hundreds of rows every time | Redis cache-aside with versioned keys; checkout never reads the cache | [cache tests](api/test/cache.test.ts) |
+| Setup differs between machines | "Works on my machine" | Docker Compose: one command, health checks, volumes | [docker-compose.yml](docker-compose.yml) |
 
-```bash
-# 1. Configuration
-cp .env.example .env
-cp api/.env.example api/.env
-
-# 2. Database (first start creates the tables automatically)
-docker compose up -d db
-docker compose ps          # wait for "healthy"
-
-# 3. Sample data: 3 stores, 50,000 products, delivery slots
-#    macOS / Linux / Git Bash:
-docker compose exec -T db psql -U quickkart -d quickkart < db/seed/seed.sql
-#    Windows PowerShell:
-#    Get-Content db/seed/seed.sql | docker compose exec -T db psql -U quickkart -d quickkart
-
-# 4. API (leave running)
-cd api
-npm install
-npm run dev                # http://localhost:4000/api/health
-
-# 5. Website (in a second terminal, leave running)
-cd web
-npm install
-npm run dev                # open http://localhost:5173
-```
-
-To use the admin area, register on the website, then
-`bash scripts/make-admin.sh your-email@example.com` and log in again.
-To wipe all data and reload the samples: `bash scripts/reset-data.sh`.
-
-## Run the tests
-
-```bash
-docker compose --profile test up -d db-test   # separate, throwaway test database
-cd api && npm test                            # 60 API tests (+5 Redis tests, see below)
-cd ../web && npm test                         # cart logic tests
-```
-The Redis cache tests run when a Redis is available:
-`docker run --rm -d -p 6380:6379 redis:8-alpine` then `TEST_REDIS_URL=redis://localhost:6380 npm test`.
-
-## Performance
-
-Load tests use k6 through nginx (`bash scripts/load-test.sh catalog | checkout`).
-Results and what they mean: [docs/performance.md](docs/performance.md).
-
-| Search, 50 concurrent users | Without cache | With Redis |
-|---|---|---|
-| "paneer" (~750 matches) | 155 req/s, p50 295 ms | 3,061 req/s, p50 13 ms |
-| "4242" (15 matches) | 1,239 req/s, p50 38 ms | 3,677 req/s, p50 12 ms |
-
-Measured during development with autocannon; see docs/performance.md for k6 results.
-
-### See the race condition
+### The race condition, live
 
 ```bash
 cd api && npm run demo:race
@@ -91,35 +46,83 @@ cd api && npm run demo:race
 NAIVE: 10 buyers, 1 in stock -> 10 orders created, stock now 0   <-- OVERSOLD by 9
 REAL:  10 buyers, 1 in stock -> 1 order created, 9 told "out of stock", stock now 0   <-- CORRECT
 ```
+The naive version reads stock, checks it, then writes. All 10 requests read "1" before any
+of them writes (a *lost update*). The real version checks inside the UPDATE: PostgreSQL locks
+the row, makes the next request wait, then re-checks the condition on the new value.
 
-## Project structure
+## Performance
 
+k6 load tests through nginx, Docker on a laptop ([details](docs/performance.md)):
+
+| Scenario | Result |
+|---|---|
+| 50 shoppers browsing, cache on / off | p95 **7.7 ms** / 14.1 ms, 0 errors |
+| Flash sale on ONE product, 20 orders/s | 901/901 orders placed, p95 16 ms |
+| Flash sale on ONE product, 50 orders/s | **2,250/2,250 placed, no oversell**, p95 46 ms |
+| Search "paneer", 50 concurrent connections | 155 req/s → **3,061 req/s** with Redis |
+
+The jump from 16 ms to 46 ms is **hot-row contention**: every flash-sale order locks the same
+stock row, so they go one at a time. More API servers can't fix that; [scaling.md](docs/scaling.md)
+explains what would.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  browser["Browser<br/>React app"] -->|":8080"| web["nginx<br/>static files + /api proxy"]
+  web --> api["Express API<br/>stateless, scalable"]
+  api -->|"transactions"| db[("PostgreSQL<br/>source of truth")]
+  api -.->|"catalog cache"| redis[("Redis")]
 ```
-db/init/        schema + indexes (applied automatically to a fresh database)
-db/seed/        sample data (run manually, step 3 above)
-db/queries/     measurement scripts (EXPLAIN ANALYZE), add-slots.sql
-scripts/        load-test.sh: run k6 against the Docker stack
-                try-checkout.sh, try-day4.sh: exercise the running API
-                reset-data.sh: wipe all data and reload the samples
-                make-admin.sh: promote a user to admin (no API for this, on purpose)
-api/src/        Express API
-  config.ts     environment variables, validated at start-up
-  db.ts         connection pool + withTransaction helper
-  errors.ts     HttpError + central error handler
-  middleware/   requireAuth, requireRole
-  modules/      one folder per feature (auth, catalog, orders, admin)
-  cache.ts      Redis cache-aside (optional; falls back to PostgreSQL)
-api/test/       automated tests (Vitest + Supertest)
-web/src/        React + TypeScript website (Vite, React Router, TanStack Query)
-  api/          fetch wrapper + response types
-  features/     auth, store picker, cart (reducer + context + drawer)
-  pages/        shop, login/register, checkout, orders, admin/
-  components/   header, delivery band, product tile, loading/error/empty states
-load/           k6 load tests (catalog browsing, checkout flash sale)
-docs/           task sheets, notes, performance results
-```
 
-## API so far
+More diagrams (data model, checkout sequence, order state machine): [docs/architecture.md](docs/architecture.md).
+Design decisions and their trade-offs: [docs/adr/](docs/adr/).
+
+## Run it
+
+### With Docker (one command)
+
+You need Docker Desktop and Git.
+```bash
+cp .env.example .env
+docker compose up -d --build
+docker compose exec -T db psql -U quickkart -d quickkart < db/seed/seed.sql   # sample data, once
+```
+Open **http://localhost:8080**. To use the admin area, register on the site, then run
+`bash scripts/make-admin.sh you@example.com` and log in again.
+
+| Service | Role | Reachable at |
+|---|---|---|
+| web | nginx: serves the React app, forwards `/api` | http://localhost:8080 |
+| api | Express API; scale with `docker compose up -d --scale api=3` | only through nginx |
+| db | PostgreSQL 18, data in the `pgdata` volume | localhost:5432 |
+| redis | catalog cache | inside Docker only |
+| k6 | load tester | `bash scripts/load-test.sh catalog` or `checkout` |
+
+### For development (live reload)
+
+You need Node.js 24 too.
+```bash
+cp .env.example .env && cp api/.env.example api/.env
+docker compose up -d db
+docker compose exec -T db psql -U quickkart -d quickkart < db/seed/seed.sql
+cd api && npm install && npm run dev        # http://localhost:4000/api/health
+cd web && npm install && npm run dev        # http://localhost:5173 (second terminal)
+```
+Wipe all data and reload the samples: `bash scripts/reset-data.sh`.
+
+## Tests
+
+```bash
+docker compose --profile test up -d db-test   # throwaway test database
+cd api && npm test                            # 60 API tests: auth, catalog, checkout, orders, admin
+cd web && npm test                            # cart logic
+```
+Concurrency tests fire 10 simultaneous requests and check the database afterwards.
+Redis tests run when a Redis is available: `TEST_REDIS_URL=redis://localhost:6380 npm test`.
+
+<details>
+<summary><b>API reference</b></summary>
 
 | Method | Path | Auth | Success | Errors |
 |---|---|---|---|---|
@@ -143,14 +146,36 @@ docs/           task sheets, notes, performance results
 | PATCH | /api/admin/orders/:id/status | admin | 200 | 400, 403, 404, 409 |
 | GET | /api/admin/reports/sales, /top-products, /slots | admin | 200 | 400, 403 |
 
-## Engineering challenges
+401 = not logged in; 403 = logged in but not allowed; 404 for someone else's order (doesn't
+reveal that it exists); 409 = valid request that conflicts with current state.
+</details>
 
-| Challenge | Solution | Status |
-|---|---|---|
-| Last item purchased twice | Atomic conditional `UPDATE ... WHERE stock >= qty` in one transaction | ✅ |
-| Same product in different stores | `store_inventory` junction table | ✅ |
-| Duplicate checkout requests | Idempotency keys, stored in the same transaction as the order | ✅ |
-| Too many delivery bookings | Atomic `UPDATE ... WHERE booked < capacity` | ✅ |
-| Slow product search | Trigram index + keyset pagination (measured with EXPLAIN ANALYZE) | ✅ |
-| Setup differs between machines | Docker Compose: one command, healthchecks, volumes | ✅ |
-| Slow repeated reads | Redis cache-aside with versioned keys; checkout never reads the cache | ✅ |
+<details>
+<summary><b>Project structure</b></summary>
+
+```
+api/src/
+  modules/auth       register, login, sessions (Argon2id, JWT in httpOnly cookie)
+  modules/catalog    stores, aisles, slots, search with keyset pagination + cache
+  modules/orders     checkout (placeOrder.ts), history, cancel
+  modules/admin      inventory, slots, order status, reports
+  db.ts              pool, withTransaction, withRetry
+  cache.ts           Redis cache-aside with safe fallback
+api/test/            Vitest + Supertest, including concurrency tests
+web/src/             React app: features (auth, store, cart), pages (shop, checkout, orders, admin)
+db/init/             schema, indexes (applied to a fresh database)
+db/seed/             50,000 realistic sample products
+load/                k6 scripts: catalog browsing, flash-sale checkout
+scripts/             load-test, reset-data, make-admin, try-checkout
+docs/                architecture, ADRs, performance, scaling
+```
+</details>
+
+## What I'd do next
+
+- Database migrations with a migration tool instead of init scripts.
+- Payments as a separate step (order `PENDING_PAYMENT` → `PLACED` on webhook), notifications
+  via a transactional outbox.
+- Split hot stock into buckets for flash sales ([scaling.md](docs/scaling.md)).
+- CI on GitHub Actions running both test suites on every push.
+- Scheduled clean-up of idempotency keys older than 24 hours.

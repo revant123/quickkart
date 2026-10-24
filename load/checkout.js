@@ -14,7 +14,9 @@ const SLOT_ID = Number(__ENV.SLOT_ID);
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export const options = {
-  noCookiesReset: true, // keep each customer logged in across orders
+  // k6 clears each virtual user's cookies after every iteration by default.
+  // Keep them, so each customer stays logged in after registering once.
+  noCookiesReset: true,
   scenarios: {
     flash_sale: {
       executor: 'constant-arrival-rate',
