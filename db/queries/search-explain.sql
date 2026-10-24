@@ -16,7 +16,7 @@ SELECT p.id, p.name, si.price_paise
  ORDER BY p.name, p.id
  LIMIT 21;
 
-\echo '=== Search 2: "milk" (common term, matches about 1 in 10 products) ==='
+\echo '=== Search 2: "milk" (common term, matches well over a thousand products) ==='
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT p.id, p.name, si.price_paise
   FROM store_inventory si

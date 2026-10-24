@@ -8,7 +8,7 @@ const app = buildApp();
 
 /**
  * Small, predictable catalog:
- *   store 1 stocks: Amul Milk, Banana Chips, Cola 100% Juice, Fresh Milk, Milk Bread
+ *   store 1 stocks: Apna Milk, Banana Chips, Cola 100% Juice, Fresh Milk, Milk Bread
  *   store 2 stocks: only Fresh Milk (at a different price) -> multi-store check
  *   store 3 is inactive
  */
@@ -20,7 +20,7 @@ async function seedCatalog() {
       ('Closed',  'Mohali',     '160062', false);
     INSERT INTO categories (name, slug) VALUES ('Dairy', 'dairy'), ('Snacks', 'snacks');
     INSERT INTO products (category_id, name, unit) VALUES
-      (1, 'Amul Milk',        '500 ml'),
+      (1, 'Apna Milk',        '500 ml'),
       (2, 'Banana Chips',     '150 g'),
       (2, 'Cola 100% Juice',  '1 l'),
       (1, 'Fresh Milk',       '1 l'),
@@ -55,11 +55,37 @@ describe('catalog', () => {
     expect(res.body.map((c: { slug: string }) => c.slug)).toEqual(['dairy', 'snacks']);
   });
 
-  it('returns products sorted by name, with price and in_stock', async () => {
+  it('browsing lists products in catalogue (id) order; searching lists A to Z', async () => {
+    // A product added last, whose name sorts first
+    await pool.query(`INSERT INTO products (category_id, name, unit) VALUES (2, 'Aloo Bhujia', '200 g')`);
+    await pool.query(`INSERT INTO store_inventory (store_id, product_id, price_paise, stock) VALUES (1, 6, 3500, 4)`);
+
+    const browse = await request(app).get('/api/stores/1/products');
+    expect(names(browse).at(-1)).toBe('Aloo Bhujia'); // newest id last
+    const search = await request(app).get('/api/stores/1/products?q=a');
+    expect(names(search)[0]).toBe('Aloo Bhujia'); // A to Z
+
+    // browse cursors and search cursors both paginate without overlap
+    for (const query of ['', '&q=a']) {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const url: string = `/api/stores/1/products?limit=2${query}` +
+          (cursor ? `&cursor=${encodeURIComponent(cursor)}` : '');
+        const res = await request(app).get(url);
+        seen.push(...names(res));
+        cursor = res.body.nextCursor;
+      } while (cursor);
+      expect(new Set(seen).size).toBe(seen.length);
+      expect(seen).toHaveLength(query ? 5 : 6); // 'a' matches 5 of the 6 names
+    }
+  });
+
+  it('returns products with price and in_stock', async () => {
     const res = await request(app).get('/api/stores/1/products');
     expect(res.status).toBe(200);
     expect(names(res)).toEqual([
-      'Amul Milk', 'Banana Chips', 'Cola 100% Juice', 'Fresh Milk', 'Milk Bread',
+      'Apna Milk', 'Banana Chips', 'Cola 100% Juice', 'Fresh Milk', 'Milk Bread',
     ]);
     const chips = res.body.items.find((p: { name: string }) => p.name === 'Banana Chips');
     expect(chips).toMatchObject({ price_paise: 4000, in_stock: false });
@@ -75,7 +101,7 @@ describe('catalog', () => {
 
   it('search is case-insensitive and matches anywhere in the name', async () => {
     const res = await request(app).get('/api/stores/1/products?q=MILK');
-    expect(names(res)).toEqual(['Amul Milk', 'Fresh Milk', 'Milk Bread']);
+    expect(names(res)).toEqual(['Apna Milk', 'Fresh Milk', 'Milk Bread']);
   });
 
   it('treats % in a search as a normal character, not a wildcard', async () => {
@@ -87,7 +113,7 @@ describe('catalog', () => {
 
   it('filters by category, and combines with search', async () => {
     const dairy = await request(app).get('/api/stores/1/products?category=dairy');
-    expect(names(dairy)).toEqual(['Amul Milk', 'Fresh Milk']);
+    expect(names(dairy)).toEqual(['Apna Milk', 'Fresh Milk']);
     const both = await request(app).get('/api/stores/1/products?category=snacks&q=milk');
     expect(names(both)).toEqual(['Milk Bread']);
   });
@@ -107,7 +133,7 @@ describe('catalog', () => {
     } while (cursor);
     expect(pages).toBe(3); // 2 + 2 + 1
     expect(seen).toEqual([
-      'Amul Milk', 'Banana Chips', 'Cola 100% Juice', 'Fresh Milk', 'Milk Bread',
+      'Apna Milk', 'Banana Chips', 'Cola 100% Juice', 'Fresh Milk', 'Milk Bread',
     ]);
   });
 

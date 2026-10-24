@@ -50,8 +50,13 @@ catalogRouter.get('/stores/:storeId/slots', async (req, res) => {
 // Search + filter + KEYSET pagination.
 //   Offset pagination (OFFSET 10000) makes the database read and throw away
 //   10,000 rows, and shows duplicates if rows are inserted while scrolling.
-//   Keyset pagination remembers the last row seen (name, id) and asks for rows
-//   AFTER it, so every page costs the same. `id` breaks ties between equal names.
+//   Keyset pagination remembers the last row seen and asks for rows AFTER it,
+//   so every page costs the same.
+//
+// Two orders:
+//   searching (q given) -> A to Z by (name, id); `id` breaks ties between equal names
+//   browsing  (no q)    -> catalogue order by product id, which mixes aisles and
+//                          products, and walks the store_inventory primary key index
 // ---------------------------------------------------------------------------
 
 const ProductQuery = z.object({
@@ -61,7 +66,8 @@ const ProductQuery = z.object({
   cursor: z.string().max(300).optional(),
 });
 
-const Cursor = z.object({ name: z.string(), id: z.string() });
+// name is only present for search cursors
+const Cursor = z.object({ id: z.string(), name: z.string().optional() });
 type Cursor = z.infer<typeof Cursor>;
 
 /** In LIKE patterns, % and _ are wildcards. Escape them so "100%" means the text "100%". */
@@ -93,9 +99,15 @@ catalogRouter.get('/stores/:storeId/products', async (req, res) => {
 
   if (q) where.push(`p.name ILIKE ${param(`%${escapeLike(q)}%`)}`);
   if (category) where.push(`c.slug = ${param(category)}`);
+  const byName = Boolean(q);
   if (cursor) {
     const c = decodeCursor(cursor);
-    where.push(`(p.name, p.id) > (${param(c.name)}, ${param(c.id)})`);
+    if (byName) {
+      if (c.name === undefined) throw new HttpError(400, 'bad_cursor');
+      where.push(`(p.name, p.id) > (${param(c.name)}, ${param(c.id)})`);
+    } else {
+      where.push(`si.product_id > ${param(c.id)}`);
+    }
   }
   // Fetch one extra row: if it comes back, there is a next page.
   const limitParam = param(limit + 1);
@@ -107,7 +119,7 @@ catalogRouter.get('/stores/:storeId/products', async (req, res) => {
        JOIN products   p ON p.id = si.product_id
        JOIN categories c ON c.id = p.category_id
       WHERE ${where.join(' AND ')}
-      ORDER BY p.name, p.id
+      ORDER BY ${byName ? 'p.name, p.id' : 'si.product_id'}
       LIMIT ${limitParam}`,
     params,
   );
@@ -117,6 +129,9 @@ catalogRouter.get('/stores/:storeId/products', async (req, res) => {
   const last = items.at(-1);
   res.json({
     items,
-    nextCursor: hasMore && last ? encodeCursor({ name: last.name, id: String(last.id) }) : null,
+    nextCursor:
+      hasMore && last
+        ? encodeCursor(byName ? { id: String(last.id), name: last.name } : { id: String(last.id) })
+        : null,
   });
 });

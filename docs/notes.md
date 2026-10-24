@@ -52,3 +52,12 @@ REAL:  10 buyers, 1 in stock -> 1 order created, 9 told "out of stock", stock no
 - Why the real checkout can't: the check is inside the UPDATE (WHERE stock >= qty). The UPDATE locks the row, the next request waits, and PostgreSQL re-checks the condition on the new value (0), so it updates nothing and returns 409.
 - Idempotency key: the app sends the same key when it retries an order. The server saves the response with the key, so a retry gets the saved response instead of a second order.
 - Everything runs in one transaction: if any item is out of stock, the slot booking and all stock changes are rolled back.
+
+## Day 4
+- Order status is a state machine; legal moves are enforced inside the UPDATE (409 if illegal).
+- Cancel = one transaction: status, slot place and stock all restored, and only once
+  (10 simultaneous cancels -> 1 success, 9 x 409).
+- Admin stock changes are relative (+24), never absolute, so sales made meanwhile aren't lost.
+- Another user's order returns 404, not 403, so we don't reveal that it exists.
+- json_agg returns orders with their items in one query (avoids N+1 queries).
+- Access control: 401 = not logged in, 403 = logged in but not an admin.

@@ -25,18 +25,27 @@ docker compose exec -T db psql -U quickkart -d quickkart < db/seed/seed.sql
 #    Windows PowerShell:
 #    Get-Content db/seed/seed.sql | docker compose exec -T db psql -U quickkart -d quickkart
 
-# 4. API
+# 4. API (leave running)
 cd api
 npm install
 npm run dev                # http://localhost:4000/api/health
+
+# 5. Website (in a second terminal, leave running)
+cd web
+npm install
+npm run dev                # open http://localhost:5173
 ```
+
+To use the admin area, register on the website, then
+`bash scripts/make-admin.sh your-email@example.com` and log in again.
+To wipe all data and reload the samples: `bash scripts/reset-data.sh`.
 
 ## Run the tests
 
 ```bash
 docker compose --profile test up -d db-test   # separate, throwaway test database
-cd api
-npm test
+cd api && npm test                            # 60 API tests
+cd ../web && npm test                         # cart logic tests
 ```
 
 ### See the race condition
@@ -56,6 +65,7 @@ db/init/        schema + indexes (applied automatically to a fresh database)
 db/seed/        sample data (run manually, step 3 above)
 db/queries/     measurement scripts (EXPLAIN ANALYZE), add-slots.sql
 scripts/        try-checkout.sh, try-day4.sh: exercise the running API
+                reset-data.sh: wipe all data and reload the samples
                 make-admin.sh: promote a user to admin (no API for this, on purpose)
 api/src/        Express API
   config.ts     environment variables, validated at start-up
@@ -64,6 +74,11 @@ api/src/        Express API
   middleware/   requireAuth, requireRole
   modules/      one folder per feature (auth, catalog, orders, admin)
 api/test/       automated tests (Vitest + Supertest)
+web/src/        React + TypeScript website (Vite, React Router, TanStack Query)
+  api/          fetch wrapper + response types
+  features/     auth, store picker, cart (reducer + context + drawer)
+  pages/        shop, login/register, checkout, orders, admin/
+  components/   header, delivery band, product tile, loading/error/empty states
 docs/           task sheets, notes, architecture
 ```
 
