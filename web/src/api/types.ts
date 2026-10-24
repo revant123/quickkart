@@ -15,6 +15,7 @@ export type Product = {
   category: string;
   price_paise: number;
   in_stock: boolean;
+  low_stock: number | null; // a count only when 5 or fewer are left
 };
 export type ProductPage = { items: Product[]; nextCursor: string | null };
 
@@ -61,6 +62,7 @@ export type AdminOrder = {
 export type InventoryRow = {
   product_id: string;
   name: string;
+  image_url: string | null;
   unit: string;
   category: string;
   price_paise: number;

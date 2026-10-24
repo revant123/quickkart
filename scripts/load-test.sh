@@ -10,8 +10,15 @@ set -euo pipefail
 TEST="${1:-}"
 PSQL="docker compose exec -T db psql -U quickkart -d quickkart -Atq -v ON_ERROR_STOP=1"
 
+# k6 plays hundreds of customers from ONE machine, which the API's rate limits
+# would (correctly) block as abuse. Turn limits off for the test, back on after.
+limits_off() { RATE_LIMIT_ENABLED=false docker compose up -d --wait api >/dev/null; }
+limits_on() { docker compose up -d --wait api >/dev/null; }
+trap limits_on EXIT
+
 case "$TEST" in
   catalog)
+    limits_off
     docker compose --profile load run --rm k6 run /scripts/catalog.js
     ;;
   checkout)
@@ -26,6 +33,7 @@ case "$TEST" in
       ON CONFLICT (store_id, starts_at) DO UPDATE SET capacity = 1000000
       RETURNING id")"
     echo "Flash sale: product $PRODUCT_ID, slot $SLOT_ID, $RATE orders per second for 45 seconds"
+    limits_off
     docker compose --profile load run --rm \
       -e PRODUCT_ID="$PRODUCT_ID" -e SLOT_ID="$SLOT_ID" -e RATE="$RATE" \
       k6 run /scripts/checkout.js

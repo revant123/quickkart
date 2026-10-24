@@ -4,6 +4,7 @@ import { pool } from '../../db.js';
 import { HttpError } from '../../errors.js';
 import { cancelOrder, getOrder } from '../orders/queries.js';
 import { bumpCatalogVersion } from '../../cache.js';
+import { notifyLive, openStream } from '../../live.js';
 
 // Mounted in app.ts behind requireAuth + requireRole('admin'):
 // a customer gets 403, a logged-out visitor gets 401, for every route below.
@@ -16,6 +17,11 @@ async function assertStore(storeId: number) {
   const { rowCount } = await pool.query('SELECT 1 FROM stores WHERE id = $1', [storeId]);
   if (rowCount === 0) throw new HttpError(404, 'store_not_found');
 }
+
+// GET /api/admin/live -> Server-Sent Events: every stock, slot and order change, all stores
+adminRouter.get('/live', (req, res) => {
+  openStream(req, res, (e) => ({ event: e.type, data: e }));
+});
 
 // ===========================================================================
 // INVENTORY
@@ -45,7 +51,7 @@ adminRouter.get('/stores/:storeId/inventory', async (req, res) => {
     where.push(`si.stock < $${params.length}`);
   }
   const { rows } = await pool.query(
-    `SELECT si.product_id, p.name, p.unit, c.name AS category,
+    `SELECT si.product_id, p.name, p.unit, p.image_url, c.name AS category,
             si.price_paise, si.stock, si.is_listed, si.updated_at
        FROM store_inventory si
        JOIN products p   ON p.id = si.product_id
@@ -89,7 +95,13 @@ adminRouter.patch('/stores/:storeId/inventory/:productId', async (req, res) => {
     );
     if (!rows[0]) throw new HttpError(404, 'inventory_not_found');
     await bumpCatalogVersion(storeId); // shop pages for this store show the change at once
-    res.json(rows[0]);
+    const r = rows[0];
+    await notifyLive(pool, {
+      type: 'stock',
+      storeId,
+      items: [{ productId, stock: r.stock, pricePaise: r.price_paise, listed: r.is_listed }],
+    });
+    res.json(r);
   } catch (e: any) {
     // 23514 = check_violation: CHECK (stock >= 0) refused it
     if (e.code === '23514') throw new HttpError(409, 'stock_would_go_negative');
@@ -120,6 +132,7 @@ adminRouter.post('/stores/:storeId/slots', async (req, res) => {
        RETURNING id, store_id, starts_at, ends_at, capacity, booked`,
       [storeId, body.startsAt, body.durationMinutes, body.capacity],
     );
+    await notifyLive(pool, { type: 'slot', storeId, slotId: Number(rows[0].id), free: rows[0].capacity });
     res.status(201).json(rows[0]);
   } catch (e: any) {
     if (e.code === '23505') throw new HttpError(409, 'slot_exists'); // unique (store_id, starts_at)
@@ -189,11 +202,15 @@ adminRouter.patch('/orders/:id/status', async (req, res) => {
   const { rows } = await pool.query(
     `UPDATE orders SET status = $2
       WHERE id = $1 AND status = ANY($3::text[])
-      RETURNING id, status`,
+      RETURNING id, status, store_id, user_id`,
     [orderId, next, ALLOWED_FROM[next]],
   );
   if (rows[0]) {
-    res.json(rows[0]);
+    const o = rows[0];
+    await notifyLive(pool, {
+      type: 'order', storeId: Number(o.store_id), userId: Number(o.user_id), orderId: Number(o.id), status: o.status,
+    });
+    res.json({ id: o.id, status: o.status });
     return;
   }
   const { rows: found } = await pool.query('SELECT status FROM orders WHERE id = $1', [orderId]);

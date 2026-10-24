@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router';
 import { useCart } from './CartContext';
 import { cartCount, cartTotal } from './cartReducer';
 import { useStore } from '../store/StoreContext';
+import { useLive } from '../live/LiveProvider';
 import { QtyStepper } from '../../components/QtyStepper';
 import { formatPaise } from '../../lib/format';
 
 export function CartDrawer() {
   const { cart, dispatch, isOpen, close } = useCart();
-  const { stores } = useStore();
+  const { stores, storeId } = useStore();
+  const live = useLive();
   const navigate = useNavigate();
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -57,6 +59,31 @@ export function CartDrawer() {
                   <div className="meta">
                     {item.unit}, {formatPaise(item.pricePaise)} each
                   </div>
+                  {(() => {
+                    // Live stock for this item (only meaningful if the cart is for the store we're watching)
+                    const s = cart.storeId === storeId ? live.stock.get(item.productId) : undefined;
+                    if (s && !s.in_stock) {
+                      return (
+                        <div className="line-warning" role="status">
+                          Just sold out.{' '}
+                          <button className="link-btn" onClick={() => dispatch({ type: 'remove', productId: item.productId })}>
+                            Remove
+                          </button>
+                        </div>
+                      );
+                    }
+                    if (s?.low_stock != null && item.quantity > s.low_stock) {
+                      return (
+                        <div className="line-warning" role="status">
+                          Only {s.low_stock} left.{' '}
+                          <button className="link-btn" onClick={() => dispatch({ type: 'setQty', productId: item.productId, quantity: s.low_stock! })}>
+                            Change to {s.low_stock}
+                          </button>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
                 <div className="line-total">{formatPaise(item.pricePaise * item.quantity)}</div>
                 <QtyStepper

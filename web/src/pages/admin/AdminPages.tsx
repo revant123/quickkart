@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { NavLink, Outlet } from 'react-router';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, errorMessage } from '../../api/client';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api, errorMessage, uploadFile } from '../../api/client';
 import type {
   AdminOrder, InventoryPage, InventoryRow, OrderStatus, SalesRow, SlotUse, TopProduct,
 } from '../../api/types';
@@ -10,11 +10,27 @@ import { useDebounce } from '../../hooks/useDebounce';
 import { formatDateTime, formatPaise, formatSlot, formatTime, formatDay } from '../../lib/format';
 import { Empty, ErrorNote, Spinner } from '../../components/Feedback';
 import { StatusBadge } from '../OrderPages';
+import { useEventSource } from '../../features/live/LiveProvider';
 
 // Every request here goes to /api/admin/*, which the SERVER protects with
 // requireAuth + requireRole('admin'). Hiding these pages from customers is just UX.
 
 export function AdminLayout() {
+  const qc = useQueryClient();
+  const [live, setLive] = useState(false);
+  // One live stream for the whole admin area: new orders, status changes, stock edits
+  useEventSource(
+    '/api/admin/live',
+    {
+      order: () => {
+        qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
+        qc.invalidateQueries({ queryKey: ['admin', 'sales'] });
+      },
+      stock: () => qc.invalidateQueries({ queryKey: ['admin', 'inventory'] }),
+      slot: () => qc.invalidateQueries({ queryKey: ['admin', 'slot-usage'] }),
+    },
+    setLive,
+  );
   return (
     <div className="page">
       <div className="admin-head">
@@ -22,6 +38,11 @@ export function AdminLayout() {
           <h1 style={{ marginBottom: 4 }}>Store admin</h1>
           <span className="muted">Orders, stock, delivery slots and sales for every store.</span>
         </div>
+        {live && (
+          <span className="live-pill dark" title="This page updates as orders come in">
+            <span className="live-dot" aria-hidden="true" /> Live
+          </span>
+        )}
       </div>
       <nav className="tabs" aria-label="Admin sections">
         <NavLink end to="/admin" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Orders</NavLink>
@@ -97,7 +118,7 @@ export function AdminOrdersPage() {
       if (status) p.set('status', status);
       return api<AdminOrder[]>(`/admin/orders?${p}`);
     },
-    refetchInterval: 15_000, // new orders keep arriving
+    refetchInterval: 60_000, // safety net; live events refresh it instantly
   });
 
   const move = useMutation({
@@ -203,6 +224,7 @@ export function AdminInventoryPage() {
     initialPageParam: 0,
     getNextPageParam: (last) => last.nextAfterId ?? undefined,
     enabled: storeId !== '',
+    placeholderData: keepPreviousData, // no spinner flash while typing a search
   });
   const rows = inventory.data?.pages.flatMap((p) => p.items) ?? [];
 
@@ -237,6 +259,7 @@ export function AdminInventoryPage() {
             <table>
               <thead>
                 <tr>
+                  <th>Photo</th>
                   <th>Product</th>
                   <th>Aisle</th>
                   <th className="num">In stock</th>
@@ -294,8 +317,47 @@ function InventoryRowView({ row, storeId }: { row: InventoryRow; storeId: number
     if (paise > 0 && paise !== row.price_paise) update.mutate({ pricePaise: paise });
   };
 
+  const photo = useMutation({
+    mutationFn: (file: File | null) =>
+      file
+        ? uploadFile<{ image_url: string }>(`/admin/products/${row.product_id}/image`, 'image', file)
+        : api<{ image_url: string }>(`/admin/products/${row.product_id}/image`, { method: 'DELETE' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'inventory'] });
+      qc.invalidateQueries({ queryKey: ['products'] });
+    },
+  });
+  const custom = row.image_url?.startsWith('/api/');
+
   return (
     <tr>
+      <td>
+        <div className="photo-cell">
+          {row.image_url ? <img src={row.image_url} alt="" className="thumb" /> : <span className="thumb empty" />}
+          <div className="photo-actions">
+            <label className="link-btn">
+              {photo.isPending ? 'Uploading…' : custom ? 'Replace' : 'Upload'}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="visually-hidden"
+                disabled={photo.isPending}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) photo.mutate(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            {custom && (
+              <button className="link-btn" disabled={photo.isPending} onClick={() => photo.mutate(null)}>
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+        {photo.isError && <div className="small" style={{ color: 'var(--chilli)' }}>{errorMessage(photo.error)}</div>}
+      </td>
       <td>
         {row.name} <span className="muted small">{row.unit}</span>
         {update.isError && <div className="small" style={{ color: 'var(--chilli)' }}>{errorMessage(update.error)}</div>}

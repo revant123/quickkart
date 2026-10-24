@@ -8,7 +8,7 @@ PSQL="${PSQL:-docker compose exec -T db psql -U quickkart -d quickkart -v ON_ERR
 echo "Wiping data and loading fresh sample data (takes about 20 seconds)..."
 {
   echo "TRUNCATE users, stores, categories, products, store_inventory, delivery_slots,"
-  echo "         orders, order_items, idempotency_keys RESTART IDENTITY CASCADE;"
+  echo "         orders, order_items, idempotency_keys, product_images RESTART IDENTITY CASCADE;"
   cat db/seed/seed.sql
 } | $PSQL
 

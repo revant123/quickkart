@@ -11,6 +11,10 @@ const Env = z.object({
   REDIS_URL: z.string().optional().transform((v) => (v ? v : undefined)),
   CACHE_TTL_SECONDS: z.coerce.number().int().min(1).max(3600).default(30),
   DB_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+  // Per-IP / per-user request limits (turned off automatically in tests)
+  RATE_LIMIT_ENABLED: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
+  // Apply pending database migrations when the server starts (safe with many instances)
+  MIGRATE_ON_START: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
 

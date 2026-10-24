@@ -22,6 +22,7 @@ ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
+COPY migrations ./migrations
 
 # Don't run as root inside the container
 USER node

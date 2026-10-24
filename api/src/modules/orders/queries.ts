@@ -1,5 +1,6 @@
 import { pool, withTransaction, withRetry } from '../../db.js';
 import { HttpError } from '../../errors.js';
+import { notifyLive, type StockItem } from '../../live.js';
 
 /**
  * Orders with their items folded into one JSON array (json_agg), so the API
@@ -65,7 +66,7 @@ export function cancelOrder(orderId: number, userId?: number) {
         `UPDATE orders SET status = 'CANCELLED'
           WHERE id = $1 AND ($2::bigint IS NULL OR user_id = $2)
             AND status IN ('PLACED', 'PACKED')
-          RETURNING id, store_id, slot_id`,
+          RETURNING id, store_id, slot_id, user_id`,
         [orderId, userId ?? null],
       );
       const order = rows[0];
@@ -80,18 +81,31 @@ export function cancelOrder(orderId: number, userId?: number) {
       }
 
       // Same lock order as checkout: slot first, then products by id (no deadlocks)
-      await db.query('UPDATE delivery_slots SET booked = booked - 1 WHERE id = $1', [order.slot_id]);
+      const slot = await db.query(
+        'UPDATE delivery_slots SET booked = booked - 1 WHERE id = $1 RETURNING capacity - booked AS free',
+        [order.slot_id],
+      );
       const { rows: items } = await db.query(
         'SELECT product_id, quantity FROM order_items WHERE order_id = $1 ORDER BY product_id',
         [order.id],
       );
+      const stockAfter: StockItem[] = [];
       for (const it of items) {
-        await db.query(
+        const r = await db.query(
           `UPDATE store_inventory SET stock = stock + $3, updated_at = now()
-            WHERE store_id = $1 AND product_id = $2`,
+            WHERE store_id = $1 AND product_id = $2 RETURNING stock`,
           [order.store_id, it.product_id, it.quantity],
         );
+        if (r.rows[0]) stockAfter.push({ productId: Number(it.product_id), stock: r.rows[0].stock });
       }
+
+      // Live updates, sent only if this transaction commits
+      const storeId = Number(order.store_id);
+      await notifyLive(db, { type: 'stock', storeId, items: stockAfter });
+      await notifyLive(db, { type: 'slot', storeId, slotId: Number(order.slot_id), free: slot.rows[0].free });
+      await notifyLive(db, {
+        type: 'order', storeId, userId: Number(order.user_id), orderId: Number(order.id), status: 'CANCELLED',
+      });
       return { id: String(order.id), status: 'CANCELLED' };
     }),
   );

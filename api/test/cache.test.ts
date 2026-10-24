@@ -65,9 +65,9 @@ describe.skipIf(!REDIS)('Redis cache-aside for the catalog', () => {
     expect(milk(after).price_paise).toBe(9900);
   });
 
-  it('THE TRADE-OFF: after a checkout, the shop may show stale stock until the TTL; checkout itself is never fooled', async () => {
+  it('the expensive search is cached, but stock is read fresh: after a sell-out the shop shows it at once', async () => {
     const customer = await helpers.registerAndGetCookie(app);
-    expect(milk(await shop()).in_stock).toBe(true); // cached: in stock
+    expect(milk(await shop()).in_stock).toBe(true); // list now cached
 
     const buy = () =>
       request(app)
@@ -78,12 +78,12 @@ describe.skipIf(!REDIS)('Redis cache-aside for the catalog', () => {
 
     expect((await buy()).status).toBe(201); // buys the last one
 
-    const stale = await shop();
-    expect(stale.headers['x-cache']).toBe('HIT');
-    expect(milk(stale).in_stock).toBe(true); // the shop page is a little behind...
+    const after = await shop();
+    expect(after.headers['x-cache']).toBe('HIT'); // the list came from Redis...
+    expect(milk(after).in_stock).toBe(false); // ...but stock was read fresh from PostgreSQL
 
     const second = await buy();
-    expect(second.status).toBe(409); // ...but checkout reads PostgreSQL: no oversell
+    expect(second.status).toBe(409); // and checkout never trusts any cache anyway
     expect(second.body.error).toBe('out_of_stock');
   });
 

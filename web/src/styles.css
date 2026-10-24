@@ -1052,3 +1052,104 @@ th.num {
 .skip-link:focus {
   top: 12px;
 }
+
+/* ---------- live inventory ---------- */
+
+.low-stock {
+  align-self: flex-start;
+  font-size: var(--step--1);
+  font-weight: 700;
+  color: #8a4b00;
+  background: #fdf0d2;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-bottom: 2px;
+}
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--step--1);
+  font-weight: 700;
+  color: var(--paper);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+.live-pill.dark {
+  color: var(--leaf);
+  border-color: #b9dcc5;
+  background: var(--leaf-bg);
+}
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4cd07d;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.line-warning {
+  margin-top: 4px;
+  font-size: var(--step--1);
+  font-weight: 600;
+  color: var(--chilli);
+}
+.link-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* ---------- product pictures ---------- */
+
+.swatch.has-image {
+  align-items: center;
+  justify-content: center;
+  padding: 18px 14px 10px;
+}
+.swatch img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.photo-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: var(--herb);
+  flex: none;
+}
+.thumb.empty {
+  display: inline-block;
+}
+.photo-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+.photo-actions label.link-btn {
+  cursor: pointer;
+}
+.photo-actions label.link-btn:focus-within {
+  outline: 3px solid var(--turmeric);
+  outline-offset: 2px;
+}

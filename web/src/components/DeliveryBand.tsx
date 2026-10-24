@@ -3,6 +3,7 @@ import { api } from '../api/client';
 import type { Slot } from '../api/types';
 import { formatDay, formatTime } from '../lib/format';
 import { useStore } from '../features/store/StoreContext';
+import { useLive } from '../features/live/LiveProvider';
 
 /** The headline of the shop: when the next free delivery slot is, from real slot data. */
 export function DeliveryBand() {
@@ -15,6 +16,7 @@ export function DeliveryBand() {
   });
 
   const next = slots.data?.[0];
+  const { connected } = useLive();
 
   return (
     <section className="delivery-band" aria-label="Next delivery">
@@ -30,6 +32,11 @@ export function DeliveryBand() {
             <span className="detail">
               {store?.name}, {store?.city}. {next.free} {next.free === 1 ? 'place' : 'places'} left in this slot.
             </span>
+            {connected && (
+              <span className="live-pill" title="Stock and slots update as people order">
+                <span className="live-dot" aria-hidden="true" /> Live
+              </span>
+            )}
           </>
         ) : (
           <>

@@ -1,0 +1,77 @@
+# Continuous integration: on every push and pull request, GitHub runs the
+# same checks you run locally, on a clean machine. A red X on a commit means
+# something broke; the README badge shows the latest result.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  api:
+    name: API tests
+    runs-on: ubuntu-latest
+    # Real PostgreSQL and Redis, started next to the job (like docker compose)
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: quickkart
+          POSTGRES_PASSWORD: quickkart
+          POSTGRES_DB: quickkart_test
+        ports: ['5433:5432']
+        options: >-
+          --health-cmd "pg_isready -U quickkart -d quickkart_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports: ['6380:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Tests (migrations run first, Redis tests included)
+        run: npm test
+        env:
+          TEST_REDIS_URL: redis://localhost:6380
+      - name: Race-condition demo
+        run: npm run demo:race
+
+  web:
+    name: Website checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Type check and production build
+        run: npm run build
+      - name: Tests
+        run: npm test
+
+  docker:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose build api web

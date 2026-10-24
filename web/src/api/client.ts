@@ -33,6 +33,16 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+/** Uploads a file as multipart form data (the browser sets the Content-Type boundary itself). */
+export async function uploadFile<T>(path: string, field: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append(field, file);
+  const res = await fetch(`/api${path}`, { method: 'POST', body: form, credentials: 'include' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data.error ?? 'unknown_error', data.details);
+  return data as T;
+}
+
 /** Turns an error into one plain sentence for the user. */
 export function errorMessage(err: unknown): string {
   if (!(err instanceof ApiError)) return 'Something went wrong. Try again.';
@@ -49,6 +59,9 @@ export function errorMessage(err: unknown): string {
     slot_exists: 'This store already has a slot starting at that time.',
     slot_in_past: 'Pick a start time in the future.',
     forbidden: 'You need an admin account for this.',
+    image_too_large: 'That photo is over 1 MB. Use a smaller one.',
+    unsupported_image_type: 'Use a JPEG, PNG or WebP photo.',
+    rate_limited: 'Too many attempts. Wait a few minutes and try again.',
     unauthenticated: 'Log in to continue.',
     internal_error: 'The server hit a problem. Try again in a moment.',
   };

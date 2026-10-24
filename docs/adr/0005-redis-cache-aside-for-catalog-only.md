@@ -19,9 +19,11 @@ Cache-aside in Redis for `GET /api/stores/:id/products` only:
 ## Consequences
 - **Good:** "paneer" went from 155 to 3,061 req/s (p50 295 → 13 ms) in development
   measurements; under the k6 browse test p95 fell from 14.1 ms to 7.7 ms.
-- **Accepted trade-off:** after a checkout, the shop page may show an item as in stock for
-  up to 30 s. Safe because **checkout never reads the cache**: it re-reads price and stock
-  from PostgreSQL in its transaction (`api/test/cache.test.ts` proves no oversell).
+- **Update (Batch A): no more stale stock.** The cache now holds only the expensive part
+  (search, filter, sort). Price and stock for the ~24 products on the page are read fresh
+  with one primary-key lookup, and live updates push changes to open pages. Measured cost:
+  "paneer" serves 1,528 req/s instead of 3,061 cache-only, still ~10x the 155 without a
+  cache. Checkout never reads the cache either way (`api/test/cache.test.ts`).
 - **Never cached:** stock and prices used by checkout, slot capacity, order history,
   anything per user.
 - **Cost:** another service to run; invalidation logic to maintain.

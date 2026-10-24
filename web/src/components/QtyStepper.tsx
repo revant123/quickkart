@@ -4,10 +4,12 @@ export function QtyStepper({
   name,
   quantity,
   onChange,
+  max = MAX_QTY,
 }: {
   name: string;
   quantity: number;
   onChange: (q: number) => void;
+  max?: number;
 }) {
   return (
     <div className="stepper" role="group" aria-label={`Quantity of ${name}`}>
@@ -22,7 +24,7 @@ export function QtyStepper({
       <button
         type="button"
         onClick={() => onChange(quantity + 1)}
-        disabled={quantity >= MAX_QTY}
+        disabled={quantity >= Math.min(max, MAX_QTY)}
         aria-label={`One more ${name}`}
       >
         +

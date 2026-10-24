@@ -18,8 +18,10 @@ Passwords are hashed with Argon2id. Promotion to admin happens only in the datab
   blocks cross-site form posts from sending it.
 - **Good:** the website and API share one origin through nginx (and Vite's proxy in
   development), so no CORS configuration is needed.
-- **Cost:** a JWT can't be revoked before it expires; a stolen token or a changed role lasts
-  until expiry (the role change needs a fresh login). Fix if needed: a `sessions` table or a
-  token version per user checked on each request, or short-lived tokens with refresh.
+- **Update (Batch A):** the classic JWT weakness, no early revocation, is fixed. The token
+  carries the user's `token_version`, and `requireAuth` loads the user's current role and
+  version on every request (one primary-key lookup). Bumping the version ("log out
+  everywhere", password reset) kills all old tokens at once; role changes apply immediately.
+  The cost is one small query per authenticated request; the API is still stateless.
 - **Alternative considered:** server-side sessions in PostgreSQL or Redis. Easy to revoke,
   but adds a lookup on every request and shared state.

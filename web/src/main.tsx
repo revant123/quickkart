@@ -6,6 +6,7 @@ import { ApiError } from './api/client';
 import { App } from './App';
 import { StoreProvider } from './features/store/StoreContext';
 import { CartProvider } from './features/cart/CartContext';
+import { LiveProvider } from './features/live/LiveProvider';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -25,7 +26,9 @@ createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <StoreProvider>
           <CartProvider>
-            <App />
+            <LiveProvider>
+              <App />
+            </LiveProvider>
           </CartProvider>
         </StoreProvider>
       </BrowserRouter>

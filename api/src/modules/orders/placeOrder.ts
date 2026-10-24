@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { withTransaction, withRetry } from '../../db.js';
 import { HttpError } from '../../errors.js';
+import { notifyLive, type StockItem } from '../../live.js';
 
 // ---------------------------------------------------------------------------
 // The checkout. Solves three engineering challenges in ONE transaction:
@@ -84,7 +85,7 @@ export function placeOrder(userId: number, key: string, input: CheckoutInput) {
       const slot = await db.query(
         `UPDATE delivery_slots SET booked = booked + 1
           WHERE id = $1 AND store_id = $2 AND booked < capacity AND starts_at > now()
-          RETURNING id`,
+          RETURNING id, capacity - booked AS free`,
         [input.slotId, input.storeId],
       );
       if (slot.rowCount === 0) throw new HttpError(409, 'slot_unavailable');
@@ -95,12 +96,13 @@ export function placeOrder(userId: number, key: string, input: CheckoutInput) {
       // The price comes from the database, never from the client.
       let total = 0;
       const lines: { productId: number; quantity: number; unitPrice: number }[] = [];
+      const stockAfter: StockItem[] = [];
       for (const it of normaliseItems(input.items)) {
         const r = await db.query(
           `UPDATE store_inventory
               SET stock = stock - $3, updated_at = now()
             WHERE store_id = $1 AND product_id = $2 AND is_listed AND stock >= $3
-            RETURNING price_paise`,
+            RETURNING price_paise, stock`,
           [input.storeId, it.productId, it.quantity],
         );
         if (r.rowCount === 0) {
@@ -111,6 +113,7 @@ export function placeOrder(userId: number, key: string, input: CheckoutInput) {
         const unitPrice: number = r.rows[0].price_paise;
         total += unitPrice * it.quantity;
         lines.push({ ...it, unitPrice });
+        stockAfter.push({ productId: it.productId, stock: r.rows[0].stock });
       }
 
       // ---- 4. Create the order and its lines -----------------------------
@@ -128,6 +131,13 @@ export function placeOrder(userId: number, key: string, input: CheckoutInput) {
           [order.id, l.productId, l.quantity, l.unitPrice],
         );
       }
+
+      // ---- Live updates: queued now, delivered only if this transaction commits
+      await notifyLive(db, { type: 'stock', storeId: input.storeId, items: stockAfter });
+      await notifyLive(db, { type: 'slot', storeId: input.storeId, slotId: input.slotId, free: slot.rows[0].free });
+      await notifyLive(db, {
+        type: 'order', storeId: input.storeId, userId, orderId: Number(order.id), status: order.status,
+      });
 
       // ---- 5. Save the response with the key (commits with the order) ---
       const body = {

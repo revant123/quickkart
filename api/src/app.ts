@@ -1,32 +1,53 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { pool } from './db.js';
+import { config } from './config.js';
 import { errorHandler } from './errors.js';
 import { authRouter } from './modules/auth/routes.js';
 import { catalogRouter } from './modules/catalog/routes.js';
-import { ordersRouter } from './modules/orders/routes.js';
+import { createOrdersRouter } from './modules/orders/routes.js';
 import { adminRouter } from './modules/admin/routes.js';
+import { adminImagesRouter, publicImagesRouter } from './modules/images/routes.js';
 import { requireAuth, requireRole } from './middleware/auth.js';
+import { createLimiters, DEFAULT_LIMITS, noLimit, type RateLimits } from './middleware/rateLimit.js';
+
+export type AppOptions = {
+  /** Rate limits to enforce, or false for none. Default: on, except in tests. */
+  rateLimits?: RateLimits | false;
+};
 
 /**
  * Builds the Express app WITHOUT starting a server, so tests can send
  * requests to it in memory (see test/). server.ts is what actually listens.
  */
-export function buildApp() {
+export function buildApp(options: AppOptions = {}) {
   const app = express();
+
+  // Behind nginx (Docker) or Render's proxy: trust ONE proxy hop, so req.ip is
+  // the real client address from X-Forwarded-For (needed for per-IP rate limits)
+  app.set('trust proxy', 1);
+
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
+
+  const limitsOn = config.RATE_LIMIT_ENABLED && config.NODE_ENV !== 'test';
+  const limits = options.rateLimits ?? (limitsOn ? DEFAULT_LIMITS : false);
+  const limiter = limits ? createLimiters(limits) : { auth: noLimit, checkout: noLimit, api: noLimit };
 
   app.get('/api/health', async (_req, res) => {
     await pool.query('SELECT 1'); // proves the database is reachable
     res.json({ ok: true });
   });
 
+  app.use('/api', limiter.api);
+  app.use(['/api/auth/login', '/api/auth/register'], limiter.auth);
+
   app.use('/api/auth', authRouter);
   app.use('/api', catalogRouter);
-  app.use('/api/orders', ordersRouter);
+  app.use('/api', publicImagesRouter);
+  app.use('/api/orders', createOrdersRouter(limiter.checkout));
   // Every admin route: must be logged in (401) AND be an admin (403)
-  app.use('/api/admin', requireAuth, requireRole('admin'), adminRouter);
+  app.use('/api/admin', requireAuth, requireRole('admin'), adminRouter, adminImagesRouter);
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'not_found' });

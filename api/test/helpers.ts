@@ -5,7 +5,7 @@ import { pool } from '../src/db.js';
 /** Empties every table so each test starts from a clean database. */
 export async function resetDb() {
   await pool.query(`TRUNCATE users, stores, categories, products, store_inventory,
-    delivery_slots, orders, order_items, idempotency_keys RESTART IDENTITY CASCADE`);
+    delivery_slots, orders, order_items, idempotency_keys, product_images RESTART IDENTITY CASCADE`);
 }
 
 /** Registers a user and returns the session cookie to send with later requests. */

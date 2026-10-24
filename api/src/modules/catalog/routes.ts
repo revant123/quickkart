@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { pool } from '../../db.js';
 import { HttpError } from '../../errors.js';
 import { cached, catalogVersion } from '../../cache.js';
+import { openStream, stockView } from '../../live.js';
 
 export const catalogRouter = Router();
 
@@ -43,6 +44,31 @@ catalogRouter.get('/stores/:storeId/slots', async (req, res) => {
     [storeId],
   );
   res.json(rows);
+});
+
+// GET /api/stores/:storeId/live -> Server-Sent Events for one store:
+//   event: stock  data: [{ productId, in_stock, low_stock, price_paise?, listed? }]
+//   event: slot   data: { slotId, free }
+// Customers see stock as in/out plus a count only when it's low, never exact numbers.
+catalogRouter.get('/stores/:storeId/live', async (req, res) => {
+  const storeId = StoreId.parse(req.params.storeId);
+  await assertStore(storeId);
+  openStream(req, res, (e) => {
+    if (e.storeId !== storeId) return null;
+    if (e.type === 'stock') {
+      return {
+        event: 'stock',
+        data: e.items.map((i) => ({
+          productId: i.productId,
+          ...stockView(i.stock),
+          ...(i.pricePaise !== undefined && { price_paise: i.pricePaise }),
+          ...(i.listed !== undefined && { listed: i.listed }),
+        })),
+      };
+    }
+    if (e.type === 'slot') return { event: 'slot', data: { slotId: e.slotId, free: e.free } };
+    return null; // order events are private
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -94,8 +120,25 @@ catalogRouter.get('/stores/:storeId/products', async (req, res) => {
   const key = `catalog:${storeId}:v${version}:${JSON.stringify(query)}`;
   const { value, status } = await cached(key, () => loadProducts(storeId, query));
 
+  // The cache holds the EXPENSIVE part (search, filter, sort). Stock and price
+  // change every second, so they're read fresh for just these ~24 rows: one
+  // primary-key lookup. The page is never stale about what you can buy.
+  const ids = value.items.map((p: { id: string }) => p.id);
+  const fresh = ids.length
+    ? await pool.query(
+        `SELECT product_id, stock, price_paise FROM store_inventory
+          WHERE store_id = $1 AND product_id = ANY($2::bigint[])`,
+        [storeId, ids],
+      )
+    : { rows: [] };
+  const byId = new Map(fresh.rows.map((r) => [String(r.product_id), r]));
+  const items = value.items.map((p: { id: string }) => {
+    const f = byId.get(String(p.id));
+    return f ? { ...p, price_paise: f.price_paise, ...stockView(f.stock) } : p;
+  });
+
   res.set('X-Cache', status); // HIT / MISS / OFF: visible in the browser's network tab
-  res.json(value);
+  res.json({ ...value, items });
 });
 
 async function loadProducts(storeId: number, { q, category, limit, cursor }: z.infer<typeof ProductQuery>) {
@@ -127,7 +170,7 @@ async function loadProducts(storeId: number, { q, category, limit, cursor }: z.i
 
   const { rows } = await pool.query(
     `SELECT p.id, p.name, p.unit, p.image_url, c.slug AS category,
-            si.price_paise, si.stock > 0 AS in_stock
+            si.price_paise, si.stock
        FROM store_inventory si
        JOIN products   p ON p.id = si.product_id
        JOIN categories c ON c.id = p.category_id
@@ -138,8 +181,10 @@ async function loadProducts(storeId: number, { q, category, limit, cursor }: z.i
   );
 
   const hasMore = rows.length > limit;
-  const items = rows.slice(0, limit);
-  const last = items.at(-1);
+  const page = rows.slice(0, limit);
+  const last = page.at(-1);
+  // Never expose exact stock: in/out, plus a count only when it's low
+  const items = page.map(({ stock, ...p }) => ({ ...p, ...stockView(stock) }));
   return {
     items,
     nextCursor:

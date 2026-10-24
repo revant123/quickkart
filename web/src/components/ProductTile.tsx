@@ -24,11 +24,18 @@ export function ProductTile({ product, storeId }: { product: Product; storeId: n
 
   return (
     <article className={`tile${product.in_stock ? '' : ' sold-out'}`}>
-      <div className={`swatch sw-${product.category}`} aria-hidden="true">
+      <div className={`swatch sw-${product.category}${product.image_url ? ' has-image' : ''}`} aria-hidden="true">
         <span className="unit-tag">{product.unit}</span>
-        <span className="noun">{productNoun(product.name)}</span>
+        {product.image_url ? (
+          <img src={product.image_url} alt="" loading="lazy" decoding="async" />
+        ) : (
+          <span className="noun">{productNoun(product.name)}</span>
+        )}
       </div>
       <h3 className="tile-name small">{product.name}</h3>
+      {product.in_stock && product.low_stock !== null && (
+        <span className="low-stock">Only {product.low_stock} left</span>
+      )}
       <div className="tile-foot">
         <span className="price">{formatPaise(product.price_paise)}</span>
         {!product.in_stock ? (
@@ -41,6 +48,7 @@ export function ProductTile({ product, storeId }: { product: Product; storeId: n
           <QtyStepper
             name={product.name}
             quantity={qty}
+            max={product.low_stock ?? undefined}
             onChange={(q) => dispatch({ type: 'setQty', productId: id, quantity: q })}
           />
         )}

@@ -5,6 +5,8 @@
 -- "Chakki atta 5 kg" in Staples). Names end in a number ("Malai paneer 4242")
 -- so each is unique and number searches like "4242" still work.
 --
+-- Needs the tables first: start the API once (it applies migrations) or run
+--   cd api && npm run migrate
 -- Fresh database:   docker compose exec -T db psql -U quickkart -d quickkart < db/seed/seed.sql
 -- Existing data:    bash scripts/reset-data.sh   (wipes everything, then runs this)
 
@@ -75,10 +77,11 @@ numbered AS (
   FROM generate_series(1, 1250) AS s
   CROSS JOIN kinds k
 )
-INSERT INTO products (category_id, name, unit)
+INSERT INTO products (category_id, name, unit, image_url)
 SELECT c.id,
        n.styles[1 + (n.s % 5)] || ' ' || n.noun || ' ' || n.g,
-       n.units[1 + ((n.s / 5) % 2)]
+       n.units[1 + ((n.s / 5) % 2)],
+       '/img/products/' || n.noun || '.svg'   -- illustration for its kind
 FROM numbered n
 JOIN categories c ON c.slug = n.category_slug
 ORDER BY n.g;

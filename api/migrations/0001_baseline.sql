@@ -1,10 +1,10 @@
--- QuickKart schema.
--- Runs automatically when the database volume is empty (first `docker compose up`).
--- To re-apply after editing: docker compose down -v && docker compose up -d db
+-- 0001 baseline: the schema built on Days 1-2.
+-- Written with IF NOT EXISTS so it is a no-op on a database created before
+-- migrations existed, and creates everything on a fresh one.
 
-CREATE EXTENSION IF NOT EXISTS pg_trgm;   -- text-search index support (used on Day 2)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;   -- trigram index support for product search
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   email         TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE users (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE stores (
+CREATE TABLE IF NOT EXISTS stores (
   id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   name      TEXT NOT NULL,
   city      TEXT NOT NULL,
@@ -21,14 +21,14 @@ CREATE TABLE stores (
   is_active BOOLEAN NOT NULL DEFAULT true
 );
 
-CREATE TABLE categories (
+CREATE TABLE IF NOT EXISTS categories (
   id   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   slug TEXT NOT NULL UNIQUE                  -- URL-friendly name, e.g. 'fruits-vegetables'
 );
 
 -- The catalog item itself. Facts about the PRODUCT only (same in every store).
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS products (
   id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   category_id BIGINT NOT NULL REFERENCES categories(id),
   name        TEXT NOT NULL,
@@ -39,7 +39,7 @@ CREATE TABLE products (
 
 -- One row per (store, product): THIS store's price and stock for THIS product.
 -- This junction table is what makes QuickKart multi-store.
-CREATE TABLE store_inventory (
+CREATE TABLE IF NOT EXISTS store_inventory (
   store_id    BIGINT  NOT NULL REFERENCES stores(id),
   product_id  BIGINT  NOT NULL REFERENCES products(id),
   price_paise INTEGER NOT NULL CHECK (price_paise > 0),   -- money as integer paise, never float
@@ -49,7 +49,7 @@ CREATE TABLE store_inventory (
   PRIMARY KEY (store_id, product_id)
 );
 
-CREATE TABLE delivery_slots (
+CREATE TABLE IF NOT EXISTS delivery_slots (
   id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   store_id  BIGINT  NOT NULL REFERENCES stores(id),
   starts_at TIMESTAMPTZ NOT NULL,
@@ -61,7 +61,7 @@ CREATE TABLE delivery_slots (
   UNIQUE (store_id, starts_at)
 );
 
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
   id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id     BIGINT NOT NULL REFERENCES users(id),
   store_id    BIGINT NOT NULL REFERENCES stores(id),
@@ -73,7 +73,7 @@ CREATE TABLE orders (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE order_items (
+CREATE TABLE IF NOT EXISTS order_items (
   order_id         BIGINT  NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
   product_id       BIGINT  NOT NULL REFERENCES products(id),
   quantity         INTEGER NOT NULL CHECK (quantity > 0),
@@ -82,7 +82,7 @@ CREATE TABLE order_items (
 );
 
 -- Remembers checkout requests so a retried request is never processed twice (Day 3)
-CREATE TABLE idempotency_keys (
+CREATE TABLE IF NOT EXISTS idempotency_keys (
   user_id       BIGINT NOT NULL REFERENCES users(id),
   key           TEXT   NOT NULL,
   request_hash  TEXT   NOT NULL,
@@ -91,3 +91,13 @@ CREATE TABLE idempotency_keys (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, key)
 );
+
+-- Indexes for the queries the app runs
+CREATE INDEX IF NOT EXISTS idx_products_category    ON products (category_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_product    ON store_inventory (product_id);
+CREATE INDEX IF NOT EXISTS idx_orders_user_time     ON orders (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_store_status  ON orders (store_id, status);
+CREATE INDEX IF NOT EXISTS idx_idempotency_created  ON idempotency_keys (created_at);
+
+-- Trigram index for product-name search (Day 2)
+CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING gin (name gin_trgm_ops);

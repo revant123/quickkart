@@ -43,6 +43,8 @@ services:
       PORT: 4000
       COOKIE_SECURE: "false"           # "true" once served over HTTPS
       DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      # Per-IP and per-user request limits. Load tests turn this off (see scripts/load-test.sh)
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
       # Caching is ON by default. Turn it off for a load-test comparison with:
       #   REDIS_URL= docker compose up -d api
       REDIS_URL: ${REDIS_URL-redis://redis:6379}

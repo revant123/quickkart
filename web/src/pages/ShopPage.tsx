@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { Category, ProductPage } from '../api/types';
 import { useStore } from '../features/store/StoreContext';
@@ -59,6 +59,8 @@ export function ShopPage() {
     initialPageParam: '',
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: storeId !== null,
+    // While a new search loads, keep showing the previous results instead of a spinner
+    placeholderData: keepPreviousData,
   });
 
   const items = products.data?.pages.flatMap((p) => p.items) ?? [];
@@ -133,7 +135,7 @@ export function ShopPage() {
                 Showing results for “{searchTerm}”{category ? ' in this aisle' : ''}
               </p>
             )}
-            <div className="product-grid">
+            <div className="product-grid" aria-busy={products.isPlaceholderData} style={{ opacity: products.isPlaceholderData ? 0.6 : 1 }}>
               {items.map((p) => (
                 <ProductTile key={p.id} product={p} storeId={storeId!} />
               ))}
