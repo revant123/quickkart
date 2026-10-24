@@ -3,7 +3,9 @@ import { config } from './config.js';
 
 // A pool keeps a few connections open and lends them to requests.
 // Opening a new PostgreSQL connection per request would be slow.
-export const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 10 });
+// Size it so (number of API containers) x DB_POOL_MAX stays well under
+// PostgreSQL's max_connections (100 by default).
+export const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: config.DB_POOL_MAX });
 
 /**
  * Runs `fn` inside ONE transaction on ONE borrowed connection.

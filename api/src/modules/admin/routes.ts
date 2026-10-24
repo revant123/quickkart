@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { pool } from '../../db.js';
 import { HttpError } from '../../errors.js';
 import { cancelOrder, getOrder } from '../orders/queries.js';
+import { bumpCatalogVersion } from '../../cache.js';
 
 // Mounted in app.ts behind requireAuth + requireRole('admin'):
 // a customer gets 403, a logged-out visitor gets 401, for every route below.
@@ -87,6 +88,7 @@ adminRouter.patch('/stores/:storeId/inventory/:productId', async (req, res) => {
       [storeId, productId, body.pricePaise ?? null, body.isListed ?? null, body.adjustStockBy ?? null],
     );
     if (!rows[0]) throw new HttpError(404, 'inventory_not_found');
+    await bumpCatalogVersion(storeId); // shop pages for this store show the change at once
     res.json(rows[0]);
   } catch (e: any) {
     // 23514 = check_violation: CHECK (stock >= 0) refused it

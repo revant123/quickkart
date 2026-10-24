@@ -6,7 +6,27 @@ A scalable, multi-store quick-commerce platform inspired by Blinkit.
 
 > Work in progress — this README grows as the project does.
 
-## Run it locally
+## Run it with Docker (one command)
+
+You need Docker Desktop and Git.
+
+```bash
+cp .env.example .env
+docker compose up -d --build     # PostgreSQL, Redis, API, nginx
+docker compose exec -T db psql -U quickkart -d quickkart < db/seed/seed.sql   # sample data, once
+```
+Open **http://localhost:8080**. Run several API copies behind nginx with
+`docker compose up -d --scale api=3`.
+
+| Service | What it is | Reachable at |
+|---|---|---|
+| web | nginx: serves the React app, forwards `/api` to the API | http://localhost:8080 |
+| api | Express API (stateless, can be scaled) | only through nginx |
+| db | PostgreSQL 18, data in the `pgdata` volume | localhost:5432 (for tools) |
+| redis | cache for catalog reads | only inside Docker |
+| k6 | load tester, on demand | `bash scripts/load-test.sh catalog` |
+
+## Run it for development (live reload)
 
 You need Node.js 24, Docker Desktop and Git.
 
@@ -44,9 +64,23 @@ To wipe all data and reload the samples: `bash scripts/reset-data.sh`.
 
 ```bash
 docker compose --profile test up -d db-test   # separate, throwaway test database
-cd api && npm test                            # 60 API tests
+cd api && npm test                            # 60 API tests (+5 Redis tests, see below)
 cd ../web && npm test                         # cart logic tests
 ```
+The Redis cache tests run when a Redis is available:
+`docker run --rm -d -p 6380:6379 redis:8-alpine` then `TEST_REDIS_URL=redis://localhost:6380 npm test`.
+
+## Performance
+
+Load tests use k6 through nginx (`bash scripts/load-test.sh catalog | checkout`).
+Results and what they mean: [docs/performance.md](docs/performance.md).
+
+| Search, 50 concurrent users | Without cache | With Redis |
+|---|---|---|
+| "paneer" (~750 matches) | 155 req/s, p50 295 ms | 3,061 req/s, p50 13 ms |
+| "4242" (15 matches) | 1,239 req/s, p50 38 ms | 3,677 req/s, p50 12 ms |
+
+Measured during development with autocannon; see docs/performance.md for k6 results.
 
 ### See the race condition
 
@@ -64,7 +98,8 @@ REAL:  10 buyers, 1 in stock -> 1 order created, 9 told "out of stock", stock no
 db/init/        schema + indexes (applied automatically to a fresh database)
 db/seed/        sample data (run manually, step 3 above)
 db/queries/     measurement scripts (EXPLAIN ANALYZE), add-slots.sql
-scripts/        try-checkout.sh, try-day4.sh: exercise the running API
+scripts/        load-test.sh: run k6 against the Docker stack
+                try-checkout.sh, try-day4.sh: exercise the running API
                 reset-data.sh: wipe all data and reload the samples
                 make-admin.sh: promote a user to admin (no API for this, on purpose)
 api/src/        Express API
@@ -73,13 +108,15 @@ api/src/        Express API
   errors.ts     HttpError + central error handler
   middleware/   requireAuth, requireRole
   modules/      one folder per feature (auth, catalog, orders, admin)
+  cache.ts      Redis cache-aside (optional; falls back to PostgreSQL)
 api/test/       automated tests (Vitest + Supertest)
 web/src/        React + TypeScript website (Vite, React Router, TanStack Query)
   api/          fetch wrapper + response types
   features/     auth, store picker, cart (reducer + context + drawer)
   pages/        shop, login/register, checkout, orders, admin/
   components/   header, delivery band, product tile, loading/error/empty states
-docs/           task sheets, notes, architecture
+load/           k6 load tests (catalog browsing, checkout flash sale)
+docs/           task sheets, notes, performance results
 ```
 
 ## API so far
@@ -115,4 +152,5 @@ docs/           task sheets, notes, architecture
 | Duplicate checkout requests | Idempotency keys, stored in the same transaction as the order | ✅ |
 | Too many delivery bookings | Atomic `UPDATE ... WHERE booked < capacity` | ✅ |
 | Slow product search | Trigram index + keyset pagination (measured with EXPLAIN ANALYZE) | ✅ |
-| Setup differs between machines | Docker Compose | ✅ |
+| Setup differs between machines | Docker Compose: one command, healthchecks, volumes | ✅ |
+| Slow repeated reads | Redis cache-aside with versioned keys; checkout never reads the cache | ✅ |

@@ -1,5 +1,12 @@
+# QuickKart: the whole system with one command.
+#   docker compose up -d --build        -> shop at http://localhost:8080
+#
+# Inside Compose, services find each other by NAME on a private network:
+# the API connects to "db:5432" and "redis:6379"; nginx forwards to "api:4000".
+# Only nginx (8080) and PostgreSQL (5432, for your tools) are published.
+
 services:
-  # Main development database
+  # ---- PostgreSQL: the single source of truth --------------------------------
   db:
     image: postgres:18
     environment:
@@ -7,9 +14,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"          # host:container — change the LEFT number if 5432 is taken
+      - "5432:5432"          # host:container, so npm run dev and psql tools still work
     volumes:
-      - pgdata:/var/lib/postgresql              # data lives here and survives restarts
+      - pgdata:/var/lib/postgresql                # data survives container restarts
       - ./db/init:/docker-entrypoint-initdb.d:ro  # schema, applied to a fresh volume
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -17,7 +24,47 @@ services:
       timeout: 3s
       retries: 10
 
-  # Throwaway database for automated tests (data kept in memory)
+  # ---- Redis: a disposable cache for catalog searches (Day 6) ----------------
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---- The Express API (stateless: you can run several copies) ---------------
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 4000
+      COOKIE_SECURE: "false"           # "true" once served over HTTPS
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
+      # Caching is ON by default. Turn it off for a load-test comparison with:
+      #   REDIS_URL= docker compose up -d api
+      REDIS_URL: ${REDIS_URL-redis://redis:6379}
+    depends_on:
+      db:
+        condition: service_healthy     # wait until PostgreSQL accepts connections
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # no "ports": only nginx can reach the API
+
+  # ---- nginx: serves the React app and forwards /api to the API --------------
+  web:
+    build: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---- Throwaway database for automated tests (npm test) ---------------------
   db-test:
     image: postgres:18
     environment:
@@ -31,6 +78,15 @@ services:
     volumes:
       - ./db/init:/docker-entrypoint-initdb.d:ro
     profiles: ["test"]
+
+  # ---- k6 load tester, run on demand: bash scripts/load-test.sh catalog ------
+  k6:
+    image: grafana/k6
+    volumes:
+      - ./load:/scripts:ro
+    environment:
+      BASE_URL: http://web               # through nginx, like a real user
+    profiles: ["load"]
 
 volumes:
   pgdata:

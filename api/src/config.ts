@@ -7,7 +7,10 @@ const Env = z.object({
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   COOKIE_SECURE: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
-  REDIS_URL: z.string().optional(), // used on Day 6
+  // Empty or missing = caching off. The app works without Redis; it's only faster with it.
+  REDIS_URL: z.string().optional().transform((v) => (v ? v : undefined)),
+  CACHE_TTL_SECONDS: z.coerce.number().int().min(1).max(3600).default(30),
+  DB_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
 

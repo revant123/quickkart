@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { pool } from '../../db.js';
 import { HttpError } from '../../errors.js';
+import { cached, catalogVersion } from '../../cache.js';
 
 export const catalogRouter = Router();
 
@@ -85,7 +86,19 @@ function decodeCursor(s: string): Cursor {
 
 catalogRouter.get('/stores/:storeId/products', async (req, res) => {
   const storeId = StoreId.parse(req.params.storeId);
-  const { q, category, limit, cursor } = ProductQuery.parse(req.query);
+  const query = ProductQuery.parse(req.query);
+
+  // Cache-aside (see src/cache.ts). The key holds every input that changes the
+  // answer, plus the store's catalog version (bumped when an admin edits stock).
+  const version = await catalogVersion(storeId);
+  const key = `catalog:${storeId}:v${version}:${JSON.stringify(query)}`;
+  const { value, status } = await cached(key, () => loadProducts(storeId, query));
+
+  res.set('X-Cache', status); // HIT / MISS / OFF: visible in the browser's network tab
+  res.json(value);
+});
+
+async function loadProducts(storeId: number, { q, category, limit, cursor }: z.infer<typeof ProductQuery>) {
   await assertStore(storeId);
 
   // Only these fixed SQL fragments are ever joined together.
@@ -127,11 +140,11 @@ catalogRouter.get('/stores/:storeId/products', async (req, res) => {
   const hasMore = rows.length > limit;
   const items = rows.slice(0, limit);
   const last = items.at(-1);
-  res.json({
+  return {
     items,
     nextCursor:
       hasMore && last
         ? encodeCursor(byName ? { id: String(last.id), name: last.name } : { id: String(last.id) })
         : null,
-  });
-});
+  };
+}
