@@ -20,11 +20,14 @@
 
 
 ### Still unclear
+
+## Day 2
+
 ### Search measurements (store 1, 50,000 products)
 | Search | Without index | With trigram index |
 |---|---|---|
-| "4242" (about 15 matches) | ___ ms, Seq Scan | ___ ms, Bitmap Index Scan |
-| "milk" (about 5,000 matches) | ___ ms, Seq Scan | ___ ms |
+| "4242" (about 15 matches) | 19.433 ms, Seq Scan | 37.891 ms, Bitmap Index Scan |
+| "milk" (about 5,000 matches) | 0.544 ms, Seq Scan | 21.947 ms |
 
 ### What I learned
 - A normal B-tree index can't help `ILIKE '%term%'` because the term can start anywhere
