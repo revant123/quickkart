@@ -11,7 +11,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo:race": "vitest run test/race-demo.test.ts --silent=false"
   },
   "dependencies": {
     "argon2": "^0.45.1",

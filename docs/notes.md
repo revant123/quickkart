@@ -21,35 +21,34 @@
 
 ### Still unclear
 
+
 ## Day 2
 
 ### Search measurements (store 1, 50,000 products)
-| Search | Without index | With trigram index |
-|---|---|---|
-| "4242" (about 15 matches) | 19.433 ms, Seq Scan | 37.891 ms, Bitmap Index Scan |
-| "milk" (about 5,000 matches) | 0.544 ms, Seq Scan | 21.947 ms |
+| Search | Without index | With trigram index | Speed-up |
+|---|---|---|---|
+| "4242" (about 15 matches) | 19.4 ms, Seq Scan | 0.54 ms, Bitmap Index Scan | ~36x faster |
+| "milk" (about 5,000 matches) | 37.9 ms, Seq Scan | 21.9 ms | ~1.7x faster |
 
 ### What I learned
-- A normal B-tree index can't help `ILIKE '%term%'` because the term can start anywhere
-  in the name. A trigram index splits names into 3-letter pieces, so PostgreSQL can find
-  names containing the term without reading every row.
-- The index helped "4242" hugely because it is selective (few matches). It helped "milk"
-  much less: with about 5,000 matches, most of the time goes to fetching and sorting those
-  rows, which no index avoids. An index pays off when a query keeps a small fraction of rows.
-- Indexes are not free: they use disk space and slow down every INSERT and UPDATE,
-  so you add them for queries you actually run, after measuring.
+- A normal B-tree index can't help `ILIKE '%term%'` because the term can start anywhere in the name. A trigram index splits names into 3-letter pieces, so PostgreSQL can find names containing the term without reading every row.
+- The index helped "4242" hugely because it is selective (few matches). It helped "milk" much less: with about 5,000 matches, most of the time goes to fetching and sorting those rows, which no index avoids. An index pays off when a query keeps a small fraction of rows.
+- Indexes are not free: they use disk space and slow down every INSERT and UPDATE, so you add them for queries you actually run, after measuring.
 - Search needs at least 3 characters for the trigram index to help.
 
 ### Keyset (cursor) pagination
-- OFFSET pagination makes the database read and discard all earlier rows, so deep pages
-  get slower, and items shift if new products are added while scrolling.
-- Keyset pagination remembers the last row seen (name, id) and asks for rows after it,
-  so page 500 costs the same as page 1 and there are no duplicates. `id` breaks ties
-  between products with the same name. Trade-off: you can't jump to "page 37", only "next".
-```
+- OFFSET pagination makes the database read and discard all earlier rows, so deep pages get slower, and items shift if new products are added while scrolling.
+- Keyset pagination remembers the last row seen (name, id) and asks for rows after it, so page 500 costs the same as page 1 and there are no duplicates. `id` breaks ties between products with the same name. Trade-off: you can't jump to "page 37", only "next".
 
-Note: exact times change every run (the first run is often slower because data is not
-yet in memory). Run it twice and use the second result.
 
-first time - Execution Time: 19.433 ms and Execution Time: 37.891 ms
-second time - Execution Time: 0.544 ms and Execution Time: 21.947 ms
+## Day 3
+
+### Race-condition demo (npm run demo:race)
+NAIVE: 10 buyers, 1 in stock -> 10 orders created, stock now 0   <-- OVERSOLD by 9
+REAL:  10 buyers, 1 in stock -> 1 order created, 9 told "out of stock", stock now 0   <-- CORRECT
+
+### In my own words
+- Why the naive checkout oversells: all 10 requests read stock = 1 before any of them wrote, so all 10 passed the check. Each then wrote stock = 0, overwriting each other (lost update). Stock never went negative, so the CHECK constraint didn't catch it.
+- Why the real checkout can't: the check is inside the UPDATE (WHERE stock >= qty). The UPDATE locks the row, the next request waits, and PostgreSQL re-checks the condition on the new value (0), so it updates nothing and returns 409.
+- Idempotency key: the app sends the same key when it retries an order. The server saves the response with the key, so a retry gets the saved response instead of a second order.
+- Everything runs in one transaction: if any item is out of stock, the slot booking and all stock changes are rolled back.

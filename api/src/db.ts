@@ -27,3 +27,23 @@ export async function withTransaction<T>(fn: (db: pg.PoolClient) => Promise<T>):
     client.release(); // always return the connection to the pool
   }
 }
+
+// PostgreSQL error codes that mean "nothing was changed, just try again":
+//   40001 serialization_failure, 40P01 deadlock_detected
+const RETRYABLE = new Set(['40001', '40P01']);
+
+/**
+ * Retries `fn` a few times if PostgreSQL aborted it with a transient error.
+ * Safe because an aborted transaction changed nothing. Waits a little longer
+ * each time, plus random "jitter" so retries don't collide again.
+ */
+export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      if (!RETRYABLE.has(e?.code) || i >= attempts) throw e;
+      await new Promise((r) => setTimeout(r, 20 * 2 ** i + Math.random() * 20));
+    }
+  }
+}

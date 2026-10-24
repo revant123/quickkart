@@ -4,6 +4,7 @@ import { pool } from './db.js';
 import { errorHandler } from './errors.js';
 import { authRouter } from './modules/auth/routes.js';
 import { catalogRouter } from './modules/catalog/routes.js';
+import { ordersRouter } from './modules/orders/routes.js';
 
 /**
  * Builds the Express app WITHOUT starting a server, so tests can send
@@ -21,7 +22,8 @@ export function buildApp() {
 
   app.use('/api/auth', authRouter);
   app.use('/api', catalogRouter);
-  // Day 3+: orders and admin routers get mounted here
+  app.use('/api/orders', ordersRouter);
+  // Day 4: admin router gets mounted here
 
   app.use((_req, res) => {
     res.status(404).json({ error: 'not_found' });
