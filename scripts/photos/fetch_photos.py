@@ -25,38 +25,67 @@ CREDITS = OUT_DIR / 'credits.json'
 PICKS = HERE / 'photos.json'
 CAND = HERE / '.candidates'
 API = 'https://commons.wikimedia.org/w/api.php'
-UA = {'User-Agent': 'QuickKart-student-project/1.0 (https://github.com/revant123/quickkart)'}
+UA = {'User-Agent': 'QuickKart-student-project/1.0 (https://github.com/revant123/quickkart; educational demo)'}
 
 # Tile is 1 : 0.82 (see .swatch in web/src/styles.css). 600 px wide covers 2x screens.
 TILE_W, TILE_H = 600, 492
 
 OK_LICENCE = re.compile(r'^(public domain|pd\b|cc0|cc[ -]by(-sa)?[ -]\d)', re.I)
 
-# What to search Commons for, per product kind (the noun at the end of sample product names).
+# What to search Commons for, per product kind (the noun at the end of sample product
+# names). CirrusSearch syntax: intitle: matches the file name, which describes the photo
+# far better than full-text search (that also matches licence boilerplate). Queries are
+# tried in order until there are enough candidates.
 QUERIES = {
-    'apple': 'red apple fruit', 'atta': 'whole wheat flour atta', 'banana': 'bananas bunch',
-    'besan': 'gram flour besan', 'biscuits': 'biscuits', 'butter': 'butter block',
-    'carrot': 'carrots', 'cheese': 'cheese slices', 'chips': 'potato chips',
-    'chocolate': 'chocolate bar pieces', 'coffee': 'cup of coffee', 'cola': 'cola glass ice',
-    'cookies': 'chocolate chip cookies', 'cream': 'fresh cream bowl', 'curd': 'dahi curd bowl',
-    'dal': 'toor dal lentils', 'ghee': 'ghee jar', 'juice': 'orange juice glass',
-    'lassi': 'lassi glass', 'lemonade': 'lemonade glass', 'mango': 'mangoes',
-    'milk': 'glass of milk', 'namkeen': 'namkeen indian snack mixture', 'oil': 'cooking oil bottle',
-    'onion': 'red onions', 'paneer': 'paneer', 'peanuts': 'roasted peanuts',
-    'poha': 'poha flattened rice', 'popcorn': 'popcorn bowl', 'potato': 'potatoes',
-    'rice': 'basmati rice grains', 'salt': 'salt crystals', 'shake': 'milkshake glass',
-    'soda': 'soda water glass bubbles', 'spinach': 'spinach leaves', 'sugar': 'white sugar',
-    'tea': 'cup of tea chai', 'tomato': 'tomatoes', 'wafers': 'wafer biscuits',
-    'water': 'bottled water',
+    'apple': ['intitle:"red apple"', 'intitle:apples'],
+    'atta': ['intitle:"wheat flour"', 'intitle:atta flour'],
+    'banana': ['intitle:"bunch of bananas"', 'intitle:bananas'],
+    'besan': ['intitle:besan', 'intitle:"gram flour"', 'intitle:"chickpea flour"'],
+    'biscuits': ['intitle:biscuits plate', 'intitle:biscuits'],
+    'butter': ['intitle:butter intitle:block', 'intitle:butter'],
+    'carrot': ['intitle:carrots'],
+    'cheese': ['intitle:"cheddar cheese"', 'intitle:cheese'],
+    'chips': ['intitle:"potato chips"', 'intitle:crisps'],
+    'chocolate': ['intitle:"chocolate bar"', 'intitle:chocolate'],
+    'coffee': ['intitle:"cup of coffee"', 'intitle:coffee cup'],
+    'cola': ['intitle:cola glass', 'intitle:cola'],
+    'cookies': ['intitle:"chocolate chip cookies"', 'intitle:cookies'],
+    'cream': ['intitle:"whipped cream"', 'intitle:cream bowl'],
+    'curd': ['intitle:dahi', 'intitle:curd', 'intitle:yogurt bowl'],
+    'dal': ['intitle:"toor dal"', 'intitle:dal lentils', 'intitle:lentils'],
+    'ghee': ['intitle:ghee'],
+    'juice': ['intitle:"orange juice"'],
+    'lassi': ['intitle:lassi'],
+    'lemonade': ['intitle:lemonade', 'intitle:"nimbu pani"'],
+    'mango': ['intitle:mangoes', 'intitle:mango fruit'],
+    'milk': ['intitle:"glass of milk"', 'intitle:milk glass'],
+    'namkeen': ['intitle:namkeen', 'intitle:"bombay mix"', 'intitle:chivda'],
+    'oil': ['intitle:"cooking oil"', 'intitle:"vegetable oil"', 'intitle:"sunflower oil"'],
+    'onion': ['intitle:"red onions"', 'intitle:onions'],
+    'paneer': ['intitle:paneer'],
+    'peanuts': ['intitle:"roasted peanuts"', 'intitle:peanuts'],
+    'poha': ['intitle:poha', 'intitle:"flattened rice"'],
+    'popcorn': ['intitle:popcorn'],
+    'potato': ['intitle:potatoes'],
+    'rice': ['intitle:"basmati rice"', 'intitle:rice grains'],
+    'salt': ['intitle:"table salt"', 'intitle:salt'],
+    'shake': ['intitle:milkshake'],
+    'soda': ['intitle:"soda water"', 'intitle:"sparkling water"'],
+    'spinach': ['intitle:spinach leaves', 'intitle:spinach'],
+    'sugar': ['intitle:"white sugar"', 'intitle:sugar cubes', 'intitle:sugar'],
+    'tea': ['intitle:"cup of tea"', 'intitle:chai', 'intitle:tea cup'],
+    'tomato': ['intitle:tomatoes'],
+    'wafers': ['intitle:wafers', 'intitle:"wafer biscuits"'],
+    'water': ['intitle:"bottled water"', 'intitle:"water bottle"'],
 }
 
 
 def api(**params):
     params |= {'format': 'json', 'formatversion': 2}
-    for attempt in range(4):
+    for attempt in range(6):
         r = requests.get(API, params=params, headers=UA, timeout=30)
-        if r.status_code == 429:
-            time.sleep(2 + attempt * 3)
+        if r.status_code == 429:  # be polite: wait as long as asked, then longer
+            time.sleep(int(r.headers.get('Retry-After', 0) or 0) + 5 * (attempt + 1))
             continue
         r.raise_for_status()
         return r.json()
@@ -71,7 +100,7 @@ def file_infos(search=None, titles=None, width=320, limit=20):
     """Image info + licence for a search or explicit titles. Only photos (jpeg/png/webp)."""
     q = dict(action='query', prop='imageinfo', iiprop='url|size|mime|extmetadata', iiurlwidth=width)
     if search:
-        q |= dict(generator='search', gsrsearch=f'{search} filetype:bitmap', gsrnamespace=6, gsrlimit=limit)
+        q |= dict(generator='search', gsrsearch=f'{search} filetype:bitmap filew:>700', gsrnamespace=6, gsrlimit=limit)
     else:
         q |= dict(titles='|'.join(titles))
     pages = (api(**q).get('query') or {}).get('pages') or []
@@ -99,10 +128,10 @@ def file_infos(search=None, titles=None, width=320, limit=20):
 
 
 def get_image(url):
-    for attempt in range(4):
+    for attempt in range(6):
         r = requests.get(url, headers=UA, timeout=60)
         if r.status_code == 429:
-            time.sleep(2 + attempt * 3)
+            time.sleep(int(r.headers.get('Retry-After', 0) or 0) + 5 * (attempt + 1))
             continue
         r.raise_for_status()
         return Image.open(io.BytesIO(r.content))
@@ -118,7 +147,16 @@ def search():
     CAND.mkdir(exist_ok=True)
     only = sys.argv[2:] or list(QUERIES)
     for noun in only:
-        found = [c for c in file_infos(search=QUERIES[noun]) if (c['width'] or 0) >= 600][:8]
+        found, seen = [], set()
+        for query in QUERIES[noun]:
+            for c in file_infos(search=query, limit=30):
+                if c['title'] not in seen and (c['width'] or 0) >= 700:
+                    seen.add(c['title'])
+                    found.append(c)
+            time.sleep(1)
+            if len(found) >= 8:
+                break
+        found = found[:8]
         (CAND / f'{noun}.json').write_text(json.dumps(found, indent=1))
         cell_w, cell_h = 300, 246
         sheet = Image.new('RGB', (cell_w * 4, (cell_h + 22) * 2), 'white')
@@ -132,7 +170,7 @@ def search():
             x, y = (i % 4) * cell_w, (i // 4) * (cell_h + 22)
             sheet.paste(tile, (x + 3, y + 3))
             draw.text((x + 6, y + cell_h), f'{i}: {c["licence"]}', fill='black')
-            time.sleep(0.3)
+            time.sleep(0.5)
         sheet.save(CAND / f'{noun}.jpg', quality=80)
         print(f'{noun}: {len(found)} candidates')
 
