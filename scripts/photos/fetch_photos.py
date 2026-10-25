@@ -96,7 +96,12 @@ def strip_html(s):
     return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', s or '')).strip()
 
 
-def file_infos(search=None, titles=None, width=320, limit=20):
+# Wikimedia pre-renders thumbnails at standard widths (e.g. 330, 960, 1280 px); other
+# widths are generated on demand and are rate-limited much harder, so only use these.
+SHEET_WIDTH, BUILD_WIDTH = 330, 1280
+
+
+def file_infos(search=None, titles=None, width=SHEET_WIDTH, limit=20):
     """Image info + licence for a search or explicit titles. Only photos (jpeg/png/webp)."""
     q = dict(action='query', prop='imageinfo', iiprop='url|size|mime|extmetadata', iiurlwidth=width)
     if search:
@@ -147,32 +152,43 @@ def search():
     CAND.mkdir(exist_ok=True)
     only = sys.argv[2:] or list(QUERIES)
     for noun in only:
-        found, seen = [], set()
-        for query in QUERIES[noun]:
-            for c in file_infos(search=query, limit=30):
-                if c['title'] not in seen and (c['width'] or 0) >= 700:
-                    seen.add(c['title'])
-                    found.append(c)
-            time.sleep(1)
-            if len(found) >= 8:
-                break
-        found = found[:8]
-        (CAND / f'{noun}.json').write_text(json.dumps(found, indent=1))
-        cell_w, cell_h = 300, 246
-        sheet = Image.new('RGB', (cell_w * 4, (cell_h + 22) * 2), 'white')
-        draw = ImageDraw.Draw(sheet)
-        for i, c in enumerate(found):
-            try:
-                tile = to_tile(get_image(c['thumb'])).resize((cell_w - 6, cell_h - 6))
-            except Exception as e:  # noqa: BLE001 - a broken candidate just shows blank
-                print(f'  {noun}[{i}] failed: {e}')
-                continue
-            x, y = (i % 4) * cell_w, (i // 4) * (cell_h + 22)
-            sheet.paste(tile, (x + 3, y + 3))
-            draw.text((x + 6, y + cell_h), f'{i}: {c["licence"]}', fill='black')
-            time.sleep(0.5)
-        sheet.save(CAND / f'{noun}.jpg', quality=80)
-        print(f'{noun}: {len(found)} candidates')
+        if not sys.argv[2:] and (CAND / f'{noun}.jpg').exists():
+            continue  # resumable: already done in an earlier run
+        try:
+            search_one(noun)
+        except requests.HTTPError as e:
+            print(f'{noun}: rate limited ({e.response.status_code}); pausing 90 s, rerun to retry it', flush=True)
+            time.sleep(90)
+
+
+def search_one(noun):
+    """Candidates and a contact sheet for one product kind."""
+    found, seen = [], set()
+    for query in QUERIES[noun]:
+        for c in file_infos(search=query, limit=30):
+            if c['title'] not in seen and (c['width'] or 0) >= 700:
+                seen.add(c['title'])
+                found.append(c)
+        time.sleep(3)
+        if len(found) >= 8:
+            break
+    found = found[:8]
+    (CAND / f'{noun}.json').write_text(json.dumps(found, indent=1))
+    cell_w, cell_h = 300, 246
+    sheet = Image.new('RGB', (cell_w * 4, (cell_h + 22) * 2), 'white')
+    draw = ImageDraw.Draw(sheet)
+    for i, c in enumerate(found):
+        try:
+            tile = to_tile(get_image(c['thumb'])).resize((cell_w - 6, cell_h - 6))
+        except Exception as e:  # noqa: BLE001 - a broken candidate just shows blank
+            print(f'  {noun}[{i}] failed: {e}')
+            continue
+        x, y = (i % 4) * cell_w, (i // 4) * (cell_h + 22)
+        sheet.paste(tile, (x + 3, y + 3))
+        draw.text((x + 6, y + cell_h), f'{i}: {c["licence"]}', fill='black')
+        time.sleep(1.5)
+    sheet.save(CAND / f'{noun}.jpg', quality=80)
+    print(f'{noun}: {len(found)} candidates', flush=True)
 
 
 def build():
@@ -180,7 +196,7 @@ def build():
     titles = [p['title'] for p in picks.values()]
     infos = {}
     for i in range(0, len(titles), 40):
-        for info in file_infos(titles=titles[i:i + 40], width=1200):
+        for info in file_infos(titles=titles[i:i + 40], width=BUILD_WIDTH):
             infos[info['title']] = info
     credits = []
     for noun, pick in sorted(picks.items()):
