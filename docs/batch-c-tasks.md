@@ -82,7 +82,7 @@ The webhook lets Razorpay tell QuickKart about a payment even if the customer cl
 
 ## 7. Put the link in your README
 
-Edit the first lines of `README.md`, replace `LIVE-URL` with your address, commit, push.
+Edit the first lines of `README.md`, replace the live demo link with your address, commit, push.
 Render redeploys automatically after every push to `main` (CI runs too).
 
 ## 8. Write in docs/notes.md (short answers)

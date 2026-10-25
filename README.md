@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/revant123/quickkart/actions/workflows/ci.yml/badge.svg)](https://github.com/revant123/quickkart/actions/workflows/ci.yml)
 
-**Live demo:** LIVE-URL (free hosting: the first visit after a quiet spell takes about a minute to wake up)
+**Live demo: [quickkart-acdk.onrender.com](https://quickkart-acdk.onrender.com)** (free hosting: the first visit after a quiet spell takes about a minute to wake up)
 
 A multi-store quick-commerce platform, inspired by 10-minute grocery delivery apps.
 Customers find the dark store that delivers to them, pick a 30-minute delivery slot, and pay
