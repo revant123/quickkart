@@ -33,9 +33,9 @@ export function sniffImageType(buf: Buffer): 'image/jpeg' | 'image/png' | 'image
   return null;
 }
 
-/** The built-in illustration for a sample product, or null. Same rule as migration 0003. */
-const ILLUSTRATION_SQL = `CASE WHEN substring(name from ' ([a-z]+) [0-9]+$') IS NOT NULL
-  THEN '/img/products/' || substring(name from ' ([a-z]+) [0-9]+$') || '.svg' END`;
+/** The built-in photo for a sample product's kind, or null. Same rule as migrations 0003 + 0005. */
+const DEFAULT_PHOTO_SQL = `CASE WHEN substring(name from ' ([a-z]+) [0-9]+$') IS NOT NULL
+  THEN '/img/products/' || substring(name from ' ([a-z]+) [0-9]+$') || '.webp' END`;
 
 async function bumpAllStores() {
   // A product's picture shows in every store, so every store's cached pages change
@@ -86,12 +86,12 @@ adminImagesRouter.post('/products/:id/image', upload.single('image'), async (req
   res.status(201).json({ image_url: imageUrl });
 });
 
-// DELETE /api/admin/products/:id/image  -> back to the illustration (or no picture)
+// DELETE /api/admin/products/:id/image  -> back to the built-in photo (or no picture)
 adminImagesRouter.delete('/products/:id/image', async (req, res) => {
   const productId = Id.parse(req.params.id);
   await pool.query('DELETE FROM product_images WHERE product_id = $1', [productId]);
   const { rows } = await pool.query(
-    `UPDATE products SET image_url = ${ILLUSTRATION_SQL} WHERE id = $1 RETURNING image_url`,
+    `UPDATE products SET image_url = ${DEFAULT_PHOTO_SQL} WHERE id = $1 RETURNING image_url`,
     [productId],
   );
   if (!rows[0]) throw new HttpError(404, 'product_not_found');

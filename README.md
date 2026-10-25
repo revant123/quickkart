@@ -30,8 +30,9 @@ PostgreSQL 18 · Redis · Docker Compose · nginx · Vitest · k6
 - **Live**: stock, "only 3 left" warnings, delivery-slot places and order status update on
   screen the moment they change, with no reload. If an item in your cart sells out, the
   cart tells you.
-- **Pictures**: an original illustration for each of the 40 product kinds; staff can
-  upload a real photo for any product.
+- **Pictures**: a real photo for each of the 40 product kinds (freely licensed, from
+  Wikimedia Commons, credited on the Photo credits page); staff can upload their own photo
+  for any product.
 - **Admin**: move orders through packed → out for delivery → delivered (new orders appear
   live), adjust stock and prices, upload photos, hide products, open delivery slots, see
   sales and best sellers.

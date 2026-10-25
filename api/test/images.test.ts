@@ -21,7 +21,7 @@ beforeEach(async () => {
   await seedShop({ stock1: 5 });
   // A sample product named like the seed data, so it maps to an illustration
   await pool.query(
-    `UPDATE products SET name = 'Malai paneer 42', image_url = '/img/products/paneer.svg' WHERE id = 1`,
+    `UPDATE products SET name = 'Malai paneer 42', image_url = '/img/products/paneer.webp' WHERE id = 1`,
   );
   admin = await registerAdmin(app);
 });
@@ -74,7 +74,7 @@ describe('product images', () => {
   it('removing the photo goes back to the illustration', async () => {
     await upload(PNG);
     const del = await request(app).delete('/api/admin/products/1/image').set('Cookie', admin);
-    expect(del.body.image_url).toBe('/img/products/paneer.svg');
+    expect(del.body.image_url).toBe('/img/products/paneer.webp');
     expect((await request(app).get('/api/products/1/image')).status).toBe(404);
   });
 });

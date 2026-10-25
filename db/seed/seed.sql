@@ -81,7 +81,7 @@ INSERT INTO products (category_id, name, unit, image_url)
 SELECT c.id,
        n.styles[1 + (n.s % 5)] || ' ' || n.noun || ' ' || n.g,
        n.units[1 + ((n.s / 5) % 2)],
-       '/img/products/' || n.noun || '.svg'   -- illustration for its kind
+       '/img/products/' || n.noun || '.webp'  -- photo of its kind (credits: /credits)
 FROM numbered n
 JOIN categories c ON c.slug = n.category_slug
 ORDER BY n.g;

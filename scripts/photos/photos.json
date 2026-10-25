@@ -20,6 +20,9 @@
  "chips": {
   "title": "File:Potato Chips (51717716019).jpg"
  },
+ "chocolate": {
+  "title": "File:Green and Black's dark chocolate bar 2.jpg"
+ },
  "coffee": {
   "title": "File:Cup of coffee (Serbian cuisine, Grand kava).jpg"
  },
@@ -35,6 +38,9 @@
  "dal": {
   "title": "File:Pigeon Pea (Toor Dal) (49683602388).jpg"
  },
+ "ghee": {
+  "title": "File:Ghee 2.jpg"
+ },
  "juice": {
   "title": "File:Orange juice 1 edit1.jpg"
  },
@@ -49,5 +55,41 @@
  },
  "oil": {
   "title": "File:Cooking oil.jpg"
+ },
+ "onion": {
+  "title": "File:Three Indian Red Onions..jpg"
+ },
+ "peanuts": {
+  "title": "File:Roasted Peanuts with shell.jpg"
+ },
+ "poha": {
+  "title": "File:Poha (Rice Flakes).jpg"
+ },
+ "potato": {
+  "title": "File:Potatoes-5785 - Hans Braxmeier.jpg"
+ },
+ "rice": {
+  "title": "File:Basmati rice textureCNE 02.jpg"
+ },
+ "salt": {
+  "title": "File:Table salt with salt shaker V1.jpg"
+ },
+ "shake": {
+  "title": "File:Salted Caramel Milkshake.jpg"
+ },
+ "spinach": {
+  "title": "File:Fresh Malabar Spinach.jpg"
+ },
+ "sugar": {
+  "title": "File:Bowl of white sugar without background.jpg"
+ },
+ "tea": {
+  "title": "File:Cup of tea.png"
+ },
+ "tomato": {
+  "title": "File:Tomato je.jpg"
+ },
+ "water": {
+  "title": "File:Bottled Water (51839803614).jpg"
  }
 }
