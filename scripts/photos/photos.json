@@ -2,8 +2,14 @@
  "apple": {
   "title": "File:Red Apple.jpg"
  },
+ "atta": {
+  "title": "File:Anjeunbaengi wheat flour 4.jpg"
+ },
  "banana": {
   "title": "File:Bunch of bananas.JPG"
+ },
+ "besan": {
+  "title": "File:Gram flour AvL.jpg"
  },
  "biscuits": {
   "title": "File:BiscuitsAmerican&British.png"
@@ -35,6 +41,9 @@
  "cream": {
   "title": "File:And some whipped cream (4315201282).jpg"
  },
+ "curd": {
+  "title": "File:Plain Yogurt.jpg"
+ },
  "dal": {
   "title": "File:Pigeon Pea (Toor Dal) (49683602388).jpg"
  },
@@ -53,17 +62,26 @@
  "milk": {
   "title": "File:Glass of milk.jpg"
  },
+ "namkeen": {
+  "title": "File:Cofresh Bombay Mix.jpg"
+ },
  "oil": {
   "title": "File:Cooking oil.jpg"
  },
  "onion": {
   "title": "File:Three Indian Red Onions..jpg"
  },
+ "paneer": {
+  "title": "File:Surati Paneer.jpg"
+ },
  "peanuts": {
   "title": "File:Roasted Peanuts with shell.jpg"
  },
  "poha": {
   "title": "File:Poha (Rice Flakes).jpg"
+ },
+ "popcorn": {
+  "title": "File:Bowl of Popcorn (Unsplash).jpg"
  },
  "potato": {
   "title": "File:Potatoes-5785 - Hans Braxmeier.jpg"
@@ -77,6 +95,9 @@
  "shake": {
   "title": "File:Salted Caramel Milkshake.jpg"
  },
+ "soda": {
+  "title": "File:Sparkling Water with Mint in Glass Cup.jpg"
+ },
  "spinach": {
   "title": "File:Fresh Malabar Spinach.jpg"
  },
@@ -88,6 +109,9 @@
  },
  "tomato": {
   "title": "File:Tomato je.jpg"
+ },
+ "wafers": {
+  "title": "File:Milk flavored peanut wafer biscuits.jpg"
  },
  "water": {
   "title": "File:Bottled Water (51839803614).jpg"
