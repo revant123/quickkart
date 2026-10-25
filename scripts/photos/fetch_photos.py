@@ -203,11 +203,13 @@ def build():
         info = infos.get(pick['title'])
         if not info:
             sys.exit(f'{noun}: {pick["title"]} not found or not freely licensed')
-        tile = to_tile(get_image(info['thumb']), tuple(pick.get('focus', (0.5, 0.5))))
-        tile.save(OUT_DIR / f'{noun}.webp', 'WEBP', quality=78, method=6)
+        target = OUT_DIR / f'{noun}.webp'
+        if not target.exists() or '--force' in sys.argv:  # resumable after a rate limit
+            tile = to_tile(get_image(info['thumb']), tuple(pick.get('focus', (0.5, 0.5))))
+            tile.save(target, 'WEBP', quality=78, method=6)
+            time.sleep(2)
         credits.append({'kind': noun, **{k: info[k] for k in ('title', 'author', 'licence', 'licence_url', 'page')}})
-        print(f'{noun}: {info["title"]} ({info["licence"]})')
-        time.sleep(0.3)
+        print(f'{noun}: {info["title"]} ({info["licence"]})', flush=True)
     CREDITS.write_text(json.dumps(credits, indent=1, ensure_ascii=False) + '\n')
     print(f'wrote {len(credits)} photos and {CREDITS.relative_to(ROOT)}')
 
