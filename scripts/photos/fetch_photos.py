@@ -98,7 +98,7 @@ def strip_html(s):
 
 # Wikimedia pre-renders thumbnails at standard widths (e.g. 330, 960, 1280 px); other
 # widths are generated on demand and are rate-limited much harder, so only use these.
-SHEET_WIDTH, BUILD_WIDTH = 330, 1280
+SHEET_WIDTH, BUILD_WIDTH = 330, 960
 
 
 def file_infos(search=None, titles=None, width=SHEET_WIDTH, limit=20):
