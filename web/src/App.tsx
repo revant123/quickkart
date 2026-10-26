@@ -1,6 +1,7 @@
 import { Link, Route, Routes } from 'react-router';
 import { Header } from './components/Header';
 import { CartDrawer } from './features/cart/CartDrawer';
+import { MobileCartBar } from './components/MobileCartBar';
 import { RequireAuth } from './features/auth/RequireAuth';
 import { ShopPage } from './pages/ShopPage';
 import { LoginPage, RegisterPage } from './pages/AuthPages';
@@ -55,6 +56,7 @@ export function App() {
       <footer className="site-footer muted">
         QuickKart is a student project. <Link to="/credits">Photo credits</Link>
       </footer>
+      <MobileCartBar />
       <CartDrawer />
     </>
   );
