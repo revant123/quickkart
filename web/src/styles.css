@@ -1434,7 +1434,8 @@ th.num {
   align-items: flex-start;
   line-height: 1.15;
   min-width: 0;
-  max-width: 230px;
+  /* never wider than its grid cell, or it runs under the menu on narrow phones */
+  max-width: min(230px, 100%);
   border: none;
   background: none;
   padding: 4px 6px;
