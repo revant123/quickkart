@@ -33,7 +33,7 @@ describe('nearest store', () => {
   });
 
   it('404 for a pincode it does not know, 400 for nonsense', async () => {
-    expect((await request(app).get('/api/stores/nearest?pincode=999999')).body.error).toBe('pincode_unknown');
+    expect((await request(app).get('/api/stores/nearest?pincode=100000')).body.error).toBe('pincode_unknown');
     expect((await request(app).get('/api/stores/nearest?pincode=12')).status).toBe(400);
     expect((await request(app).get('/api/stores/nearest?lat=200&lng=1')).status).toBe(400);
   });
@@ -78,7 +78,7 @@ describe('saved addresses', () => {
       .send({ line1: '12 Main Road', city: 'Chandigarh', pincode: '160017', phone: '12345' });
     expect(bad.status).toBe(400);
     const unknown = await request(app).post('/api/me/addresses').set('Cookie', cookie)
-      .send({ line1: '12 Main Road', city: 'Chandigarh', pincode: '999999', phone: '9876543210' });
+      .send({ line1: '12 Main Road', city: 'Chandigarh', pincode: '100000', phone: '9876543210' });
     expect(unknown.body.error).toBe('pincode_unknown');
   });
 

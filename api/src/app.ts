@@ -13,6 +13,7 @@ import { requireAuth, requireRole } from './middleware/auth.js';
 import { addressesRouter, locationRouter } from './modules/location/routes.js';
 import { paymentsRouter, razorpayWebhook } from './modules/payments/routes.js';
 import { adminRidersRouter, riderRouter } from './modules/rider/routes.js';
+import { adminStoresRouter } from './modules/stores/admin.js';
 import { createLimiters, DEFAULT_LIMITS, noLimit, type RateLimits } from './middleware/rateLimit.js';
 
 export type AppOptions = {
@@ -63,7 +64,7 @@ export function buildApp(options: AppOptions = {}) {
   app.use('/api', publicImagesRouter);
   app.use('/api/orders', createOrdersRouter(limiter.checkout));
   // Every admin route: must be logged in (401) AND be an admin (403)
-  app.use('/api/admin', requireAuth, requireRole('admin'), adminRouter, adminImagesRouter, adminRidersRouter);
+  app.use('/api/admin', requireAuth, requireRole('admin'), adminRouter, adminImagesRouter, adminRidersRouter, adminStoresRouter);
 
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'not_found' });

@@ -86,6 +86,7 @@ export function errorMessage(err: unknown): string {
     rider_has_deliveries: 'This rider still has orders on the way. Wait until they’re delivered.',
     rider_not_found: 'That rider no longer exists.',
     store_not_found: 'That store no longer exists.',
+    store_name_taken: 'A store with that name already exists. Pick another name.',
   };
   return messages[err.code] ?? `Request failed (${err.code}).`;
 }

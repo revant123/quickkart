@@ -5,7 +5,7 @@
 set -euo pipefail
 PSQL="${PSQL:-docker compose exec -T db psql -U quickkart -d quickkart -v ON_ERROR_STOP=1 -q}"
 
-echo "Wiping data and loading fresh sample data (takes about 20 seconds)..."
+echo "Wiping data and loading fresh sample data (takes about a minute)..."
 {
   echo "TRUNCATE users, stores, categories, products, store_inventory, delivery_slots,"
   echo "         orders, order_items, idempotency_keys, product_images, addresses,"

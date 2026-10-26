@@ -1,4 +1,5 @@
-import { pool } from './db.js';
+import { pool, type Queryable } from './db.js';
+import { bumpCatalogVersion } from './cache.js';
 import { config } from './config.js';
 
 // ---------------------------------------------------------------------------
@@ -79,27 +80,61 @@ export const cleanupIdempotencyKeys: Job = {
 };
 
 /**
- * Keeps 30-minute delivery slots open for the next 2 days at every active store, so a
- * demo that runs for weeks never shows "no slots". Existing slots are left alone
- * (ON CONFLICT on the store + start time). Same slot pattern as the sample data.
+ * Opens 30-minute delivery slots for the next 2 days (capacity 5, the sample data's
+ * pattern) at every active store, or just `storeId`. Existing slots are left alone
+ * (ON CONFLICT on store + start time). Returns how many were opened.
  */
+export async function openSlots(db: Queryable, storeId?: number): Promise<number> {
+  const { rowCount } = await db.query(
+    `INSERT INTO delivery_slots (store_id, starts_at, ends_at, capacity)
+     SELECT s.id, t, t + interval '30 minutes', 5
+       FROM stores s,
+            generate_series(date_trunc('hour', now()) + interval '1 hour',
+                            date_trunc('hour', now()) + interval '2 days',
+                            interval '30 minutes') AS t
+      WHERE s.is_active AND ($1::bigint IS NULL OR s.id = $1)
+     ON CONFLICT (store_id, starts_at) DO NOTHING`,
+    [storeId ?? null],
+  );
+  return rowCount ?? 0;
+}
+
+/** Keeps every store bookable, so a demo that runs for weeks never shows "no slots". */
 export const keepSlotsOpen: Job = {
   name: 'keep-slots-open',
   everyMs: 60 * 60 * 1000, // hourly
   lockId: 7_320_005,
   async run() {
     if (!config.AUTO_SLOTS) return;
-    const { rowCount } = await pool.query(
-      `INSERT INTO delivery_slots (store_id, starts_at, ends_at, capacity)
-       SELECT s.id, t, t + interval '30 minutes', 5
-         FROM stores s,
-              generate_series(date_trunc('hour', now()) + interval '1 hour',
-                              date_trunc('hour', now()) + interval '2 days',
-                              interval '30 minutes') AS t
+    const n = await openSlots(pool);
+    return n ? `opened ${n} delivery slots` : undefined;
+  },
+};
+
+/**
+ * Stocks stores that have no products yet (stores added by a migration to an existing
+ * database). Runs soon after start-up, in the background, so a deploy isn't held up by
+ * inserting ~30,000 inventory rows per store.
+ */
+export const stockNewStores: Job = {
+  name: 'stock-new-stores',
+  everyMs: 10 * 60 * 1000,
+  lockId: 7_320_006,
+  async run() {
+    const { rows } = await pool.query(
+      `SELECT s.id, s.name FROM stores s
         WHERE s.is_active
-       ON CONFLICT (store_id, starts_at) DO NOTHING`,
+          AND EXISTS (SELECT 1 FROM products)
+          AND NOT EXISTS (SELECT 1 FROM store_inventory si WHERE si.store_id = s.id)
+        ORDER BY s.id`,
     );
-    return rowCount ? `opened ${rowCount} delivery slots` : undefined;
+    for (const s of rows) {
+      const { rows: r } = await pool.query('SELECT stock_store($1) AS n', [s.id]);
+      await openSlots(pool, Number(s.id));
+      await bumpCatalogVersion(Number(s.id));
+      console.log(`[job stock-new-stores] ${s.name}: ${r[0].n} products`);
+    }
+    return rows.length ? `stocked ${rows.length} new stores` : undefined;
   },
 };
 
@@ -107,4 +142,6 @@ export const keepSlotsOpen: Job = {
 import { sendOutbox } from './notifications/outbox.js';
 import { expireUnpaidOrders, processRefunds } from './modules/payments/service.js';
 
-export const ALL_JOBS: Job[] = [cleanupIdempotencyKeys, keepSlotsOpen, sendOutbox, expireUnpaidOrders, processRefunds];
+export const ALL_JOBS: Job[] = [
+  cleanupIdempotencyKeys, stockNewStores, keepSlotsOpen, sendOutbox, expireUnpaidOrders, processRefunds,
+];

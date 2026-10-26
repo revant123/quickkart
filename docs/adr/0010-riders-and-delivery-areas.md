@@ -10,8 +10,8 @@ the same packed orders and may all try to take the same one.
 ## Decision
 - **Distance in SQL, no maps API.** Stores have a location and a `radius_km` (7 km).
   `km_between()` is a small SQL function using the haversine formula. Customers find stores
-  by GPS (`navigator.geolocation`) or by pincode; a `pincodes` table holds approximate
-  centre points for the Chandigarh tricity.
+  by GPS (`navigator.geolocation`) or by pincode; a `pincodes` table holds the centre point
+  of every Indian pincode (see "Update" below).
 - **The server checks the delivery area at checkout** (`409 outside_delivery_area`). The
   browser runs the same formula first so the customer sees "too far" before submitting.
 - **Orders copy the address.** Saved addresses can be edited or deleted; each order keeps the
@@ -35,3 +35,19 @@ the same packed orders and may all try to take the same one.
 - **Alternatives considered:** Google Maps distance API (cost, a key, a network call per
   checkout); assigning riders automatically (better utilisation, but needs live rider
   locations and is a bigger project).
+
+## Update: stores across India
+- **27 stores in 12 cities**, and an admin form that opens a store at any pincode: one
+  transaction creates it, stocks it (`stock_store()`, ~60% of the catalogue) and opens slots.
+  Stores added by a migration to an existing database are stocked by a background job, so
+  the deploy isn't held up by ~800,000 inventory inserts.
+- **Pincode data, two sources, measured against known locations:**
+  India Post's directory (via IndiaPIN, MIT) covers all ~19,000 pincodes but its post-office
+  coordinates were 1-40 km off (one Pune pincode was 690 km off). Per pincode we take the
+  median of its post offices and pull outliers back to their district's centre: right town,
+  not right street. OpenStreetMap's geocoder (Nominatim) tested at 0.1-2 km, but its policy
+  allows 1 request per second, so it's used only for the ~1,600 pincodes near stores,
+  fetched once and committed (`scripts/pincodes/osm_points.csv`, ODbL).
+- Each pincode and address records whether its point is `precise`. When an approximate
+  address looks out of range, checkout suggests "use my exact location" rather than
+  silently refusing; the server's distance check itself stays strict.

@@ -28,6 +28,10 @@ export function CreditsPage() {
         Product photos are from Wikimedia Commons, used under the licences below. Each one was
         cropped and resized to fit the shop. Photos staff upload in the admin area are theirs.
       </p>
+      <p className="muted small">
+        Pincode locations: India Post&rsquo;s All India Pincode Directory (via IndiaPIN, MIT licence) and, near
+        stores, &copy; OpenStreetMap contributors (ODbL).
+      </p>
       {isPending && <p className="muted">Loading…</p>}
       {isError && <p className="muted">The credits list couldn’t be loaded.</p>}
       {data && (

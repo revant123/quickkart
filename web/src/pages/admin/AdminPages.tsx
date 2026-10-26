@@ -3,7 +3,7 @@ import { NavLink, Outlet } from 'react-router';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, errorMessage, uploadFile } from '../../api/client';
 import type {
-  AdminOrder, InventoryPage, InventoryRow, OrderStatus, Rider, SalesRow, SlotUse, TopProduct,
+  AdminOrder, AdminStore, InventoryPage, InventoryRow, OrderStatus, Rider, SalesRow, SlotUse, TopProduct,
 } from '../../api/types';
 import { useStore } from '../../features/store/StoreContext';
 import { useDebounce } from '../../hooks/useDebounce';
@@ -48,6 +48,7 @@ export function AdminLayout() {
         <NavLink end to="/admin" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Orders</NavLink>
         <NavLink to="/admin/inventory" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Stock and prices</NavLink>
         <NavLink to="/admin/slots" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Delivery slots</NavLink>
+        <NavLink to="/admin/stores" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Stores</NavLink>
         <NavLink to="/admin/riders" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Riders</NavLink>
         <NavLink to="/admin/reports" className={({ isActive }) => `tab${isActive ? ' active' : ''}`}>Sales</NavLink>
       </nav>
@@ -717,6 +718,134 @@ export function AdminRidersPage() {
                     <button className="btn btn-sm btn-ghost" disabled={remove.isPending}
                       onClick={() => remove.mutate(r.id)}>
                       Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ===========================================================================
+// STORES: open a dark store at any pincode in India; it's stocked and gets slots at once
+// ===========================================================================
+
+export function AdminStoresPage() {
+  const qc = useQueryClient();
+  const [name, setName] = useState('');
+  const [pincode, setPincode] = useState('');
+  const [address, setAddress] = useState('');
+  const [radius, setRadius] = useState(7);
+  const [here, setHere] = useState<{ lat: number; lng: number } | null>(null);
+  const [note, setNote] = useState('');
+
+  const stores = useQuery({ queryKey: ['admin', 'stores'], queryFn: () => api<AdminStore[]>('/admin/stores') });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'stores'] });
+    qc.invalidateQueries({ queryKey: ['stores'] }); // the customer store list too
+  };
+  const add = useMutation({
+    mutationFn: () =>
+      api<AdminStore & { slots: number }>('/admin/stores', {
+        method: 'POST',
+        body: JSON.stringify({ name: name.trim(), pincode, address: address.trim() || undefined, radiusKm: radius, ...(here ?? {}) }),
+      }),
+    onSuccess: (s) => {
+      setNote(`${s.name} is open: ${s.products.toLocaleString('en-IN')} products stocked, ${s.slots} delivery slots.`);
+      setName(''); setPincode(''); setAddress(''); setHere(null);
+      refresh();
+    },
+  });
+  const toggle = useMutation({
+    mutationFn: (s: AdminStore) =>
+      api(`/admin/stores/${s.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: !s.is_active }) }),
+    onSettled: refresh,
+  });
+
+  const useHere = () =>
+    navigator.geolocation?.getCurrentPosition(
+      (p) => setHere({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => setNote('Couldn’t get your location; the pincode’s centre will be used.'),
+    );
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    setNote('');
+    if (name.trim().length >= 3 && /^[1-9][0-9]{5}$/.test(pincode)) add.mutate();
+  };
+
+  return (
+    <>
+      <section className="panel">
+        <h2 style={{ marginTop: 0 }}>Open a store</h2>
+        <p className="muted small">
+          Any pincode in India. The new store gets its own selection of the catalogue (about 60% of products, with
+          its own prices) and delivery slots for the next 2 days, straight away.
+        </p>
+        <form className="store-form" onSubmit={submit} noValidate>
+          <div className="field">
+            <label htmlFor="st-name">Store name</label>
+            <input id="st-name" className="input" placeholder="QuickKart Anna Nagar" value={name}
+              onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="st-pin">Pincode</label>
+            <input id="st-pin" className="input" inputMode="numeric" maxLength={6} value={pincode}
+              onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))} />
+          </div>
+          <div className="field">
+            <label htmlFor="st-addr">Address <span className="muted">(optional)</span></label>
+            <input id="st-addr" className="input" value={address} onChange={(e) => setAddress(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="st-radius">Delivers within (km)</label>
+            <input id="st-radius" className="input" type="number" min={1} max={30} value={radius}
+              onChange={(e) => setRadius(Number(e.target.value))} />
+          </div>
+          <div className="form-actions">
+            <button className="btn btn-dark" disabled={add.isPending}>{add.isPending ? 'Opening…' : 'Open store'}</button>
+            <button type="button" className="btn btn-ghost" onClick={useHere}>
+              {here ? 'Using your exact location' : 'Use my exact location'}
+            </button>
+          </div>
+        </form>
+        {note && <div className="notice success" role="status" style={{ marginTop: 12 }}>{note}</div>}
+        {add.isError && <ErrorNote error={add.error} />}
+      </section>
+
+      {toggle.isError && <ErrorNote error={toggle.error} />}
+      {stores.isPending ? (
+        <Spinner label="Loading stores" />
+      ) : stores.isError ? (
+        <ErrorNote error={stores.error} onRetry={() => stores.refetch()} />
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Store</th>
+                <th>City</th>
+                <th className="num">Products</th>
+                <th className="num">Radius</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {stores.data.map((s) => (
+                <tr key={s.id}>
+                  <td><strong>{s.name}</strong><div className="muted small">{s.address} · {s.pincode}</div></td>
+                  <td>{s.city}</td>
+                  <td className="num">{s.products ? s.products.toLocaleString('en-IN') : 'Stocking…'}</td>
+                  <td className="num">{s.radius_km} km</td>
+                  <td>{s.is_active ? <span className="badge DELIVERED">Open</span> : <span className="badge CANCELLED">Closed</span>}</td>
+                  <td>
+                    <button className="btn btn-sm btn-ghost" disabled={toggle.isPending} onClick={() => toggle.mutate(s)}>
+                      {s.is_active ? 'Close' : 'Reopen'}
                     </button>
                   </td>
                 </tr>

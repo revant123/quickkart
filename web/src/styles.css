@@ -1493,3 +1493,18 @@ th.num {
   background: var(--leaf-bg);
   color: #1d5034;
 }
+
+.store-form {
+  display: grid;
+  grid-template-columns: 2fr 1fr 2fr 1fr;
+  gap: 0 12px;
+  align-items: end;
+}
+.store-form .form-actions {
+  grid-column: 1 / -1;
+}
+@media (max-width: 760px) {
+  .store-form {
+    grid-template-columns: 1fr 1fr;
+  }
+}

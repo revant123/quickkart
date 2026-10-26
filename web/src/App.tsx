@@ -10,7 +10,7 @@ import { RiderPage } from './pages/RiderPage';
 import { CreditsPage } from './pages/CreditsPage';
 import { OrderDetailPage, OrdersPage } from './pages/OrderPages';
 import {
-  AdminInventoryPage, AdminLayout, AdminOrdersPage, AdminReportsPage, AdminRidersPage, AdminSlotsPage,
+  AdminInventoryPage, AdminLayout, AdminOrdersPage, AdminReportsPage, AdminRidersPage, AdminSlotsPage, AdminStoresPage,
 } from './pages/admin/AdminPages';
 
 export function App() {
@@ -37,6 +37,7 @@ export function App() {
             <Route path="inventory" element={<AdminInventoryPage />} />
             <Route path="slots" element={<AdminSlotsPage />} />
             <Route path="riders" element={<AdminRidersPage />} />
+            <Route path="stores" element={<AdminStoresPage />} />
             <Route path="reports" element={<AdminReportsPage />} />
           </Route>
           <Route

@@ -39,7 +39,7 @@ export const addressesRouter = Router();
 addressesRouter.use(requireAuth);
 
 const MAX_ADDRESSES = 10;
-const ADDRESS_FIELDS = 'id, label, line1, line2, city, pincode, phone, lat, lng, is_default';
+const ADDRESS_FIELDS = 'id, label, line1, line2, city, pincode, phone, lat, lng, precise, is_default';
 
 const AddressBody = z.object({
   label: z.string().trim().min(1).max(30).default('Home'),
@@ -78,16 +78,17 @@ addressesRouter.post('/', async (req, res) => {
     const { rows: c } = await db.query('SELECT count(*)::int AS n FROM addresses WHERE user_id = $1', [userId]);
     if (c[0].n >= MAX_ADDRESSES) throw new HttpError(409, 'too_many_addresses');
 
-    const point = body.lat !== undefined && body.lng !== undefined ? body : await pincodePoint(db, body.pincode);
+    const gps = body.lat !== undefined && body.lng !== undefined;
+    const point = gps ? { lat: body.lat!, lng: body.lng!, precise: true } : await pincodePoint(db, body.pincode);
     // The first address is the default automatically
     const makeDefault = body.isDefault ?? c[0].n === 0;
     if (makeDefault) await db.query('UPDATE addresses SET is_default = false WHERE user_id = $1', [userId]);
     const { rows } = await db.query(
-      `INSERT INTO addresses (user_id, label, line1, line2, city, pincode, phone, lat, lng, is_default)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO addresses (user_id, label, line1, line2, city, pincode, phone, lat, lng, precise, is_default)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING ${ADDRESS_FIELDS}`,
       [userId, body.label, body.line1, body.line2, body.city, body.pincode, body.phone,
-        point.lat, point.lng, makeDefault],
+        point.lat, point.lng, point.precise, makeDefault],
     );
     return rows[0];
   });
@@ -107,17 +108,20 @@ addressesRouter.patch('/:id', async (req, res) => {
     if (!cur[0]) throw new HttpError(404, 'address_not_found');
     const next = { ...cur[0], ...Object.fromEntries(Object.entries(body).filter(([, v]) => v !== undefined)) };
     // A new pincode without new GPS coordinates moves the point to that pincode's centre
-    if (body.pincode && body.pincode !== cur[0].pincode && body.lat === undefined) {
-      Object.assign(next, await pincodePoint(db, body.pincode));
+    if (body.lat !== undefined && body.lng !== undefined) {
+      next.precise = true; // fresh GPS fix
+    } else if (body.pincode && body.pincode !== cur[0].pincode) {
+      const p = await pincodePoint(db, body.pincode);
+      Object.assign(next, { lat: p.lat, lng: p.lng, precise: p.precise });
     }
     if (body.isDefault) await db.query('UPDATE addresses SET is_default = false WHERE user_id = $1', [userId]);
     const { rows } = await db.query(
       `UPDATE addresses SET label = $3, line1 = $4, line2 = $5, city = $6, pincode = $7, phone = $8,
-              lat = $9, lng = $10, is_default = $11
+              lat = $9, lng = $10, precise = $11, is_default = $12
         WHERE id = $1 AND user_id = $2
         RETURNING ${ADDRESS_FIELDS}`,
       [id, userId, next.label, next.line1, next.line2, next.city, next.pincode, next.phone,
-        next.lat, next.lng, body.isDefault ?? cur[0].is_default],
+        next.lat, next.lng, next.precise, body.isDefault ?? cur[0].is_default],
     );
     return rows[0];
   });

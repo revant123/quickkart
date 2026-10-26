@@ -36,11 +36,16 @@ export async function storesByDistance(db: Queryable, p: Point): Promise<Nearest
 
 /** The centre point of a pincode we know, or 404 pincode_unknown. */
 export async function pincodePoint(db: Queryable, pincode: string) {
-  const { rows } = await db.query('SELECT pincode, area, city, lat, lng FROM pincodes WHERE pincode = $1', [
-    pincode,
-  ]);
+  const { rows } = await db.query(
+    'SELECT pincode, area, city, state, lat, lng, precise FROM pincodes WHERE pincode = $1',
+    [pincode],
+  );
   if (!rows[0]) throw new HttpError(404, 'pincode_unknown');
-  return rows[0] as { pincode: string; area: string; city: string; lat: number; lng: number };
+  return rows[0] as {
+    pincode: string; area: string; city: string; state: string | null; lat: number; lng: number;
+    /** false: India Post's estimate, right town but possibly 10-40 km off */
+    precise: boolean;
+  };
 }
 
 /**

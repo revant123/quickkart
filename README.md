@@ -16,10 +16,13 @@ PostgreSQL 18 · Redis · Docker Compose · nginx · Vitest · k6
 
 ## What it does
 
-- **Shop**: browse 50,000 products across 3 stores, search, filter by aisle, cart, checkout
+- **Shop**: browse 50,000 products across 27 dark stores in 12 cities, search, filter by aisle, cart, checkout
   with delivery slots, order history, cancel before dispatch. Works on phones.
-- **Location**: find the store that delivers to you by GPS or pincode (7 km radius); saved
-  addresses with one default; checkout refuses addresses a store can't reach.
+- **Location, all of India**: find the store that delivers to you by GPS or any of India's
+  ~19,000 pincodes (7 km radius); saved addresses with one default; checkout refuses
+  addresses a store can't reach. Admins open new stores at any pincode from the admin area.
+  Stores in Delhi NCR, Mumbai, Bengaluru, Chennai, Hyderabad, Pune, Kolkata, Kanpur, Lucknow,
+  Jaipur, Ahmedabad and the Chandigarh tricity.
 - **Payments**: pay online with Razorpay (test mode) or cash on delivery. Unpaid orders
   release their stock after 15 minutes; money for a cancelled order is refunded automatically.
 - **Accounts**: email verification, password reset by email, "log out of all devices".
@@ -225,6 +228,7 @@ Redis tests run when a Redis is available: `TEST_REDIS_URL=redis://localhost:638
 | GET | /api/rider/orders, /api/rider/live | rider | 200 | 401, 403 |
 | POST | /api/rider/orders/:id/pickup, /deliver | rider | 200 | 404, 409 |
 | GET, POST, DELETE | /api/admin/riders | admin | 200, 204 | 403, 404, 409 |
+| GET, POST, PATCH | /api/admin/stores, /api/admin/stores/:id | admin | 200, 201 | 403, 404, 409 |
 
 401 = not logged in; 403 = logged in but not allowed; 404 for someone else's order (doesn't
 reveal that it exists); 409 = valid request that conflicts with current state; 429 = rate limited.

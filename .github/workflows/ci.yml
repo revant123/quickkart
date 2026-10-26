@@ -90,8 +90,8 @@ jobs:
           for i in $(seq 1 60); do curl -fs localhost:10000/api/health && break; sleep 2; done
           curl -fs localhost:10000/ | grep -q '<div id="root">'
           curl -fs localhost:10000/orders/123 | grep -q '<div id="root">'   # app routes get the page
-          for i in $(seq 1 60); do [ "$(curl -fs localhost:10000/api/stores | jq length)" = "3" ] && break; sleep 3; done
-          curl -fs localhost:10000/api/stores | jq -e 'length == 3'
+          for i in $(seq 1 60); do [ "$(curl -fs localhost:10000/api/stores | jq length)" = "27" ] && break; sleep 3; done
+          curl -fs localhost:10000/api/stores | jq -e 'length == 27'
           curl -fs "localhost:10000/api/stores/nearest?pincode=160017" | jq -e '.stores[0].delivers'
           curl -fs "localhost:10000/api/stores/1/products?limit=5" | jq -e '.items | length == 5'
       - if: always()

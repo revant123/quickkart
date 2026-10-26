@@ -26,7 +26,11 @@ export type Store = {
 
 export type NearbyStore = Store & { distance_km: number; delivers: boolean };
 export type NearestResult = {
-  point: { lat: number; lng: number; pincode: string | null; area: string | null; city: string | null };
+  point: {
+    lat: number; lng: number; pincode: string | null; area: string | null; city: string | null;
+    state?: string | null;
+    precise?: boolean; // false: the pincode's position is only India Post's estimate
+  };
   stores: NearbyStore[];
 };
 
@@ -40,6 +44,7 @@ export type Address = {
   phone: string;
   lat: number;
   lng: number;
+  precise: boolean; // false: placed at its pincode's approximate centre
   is_default: boolean;
 };
 export type Category = { id: string; name: string; slug: string };
@@ -130,6 +135,8 @@ export type AdminOrder = {
   payment_status: PaymentStatus;
   rider_name: string | null;
 };
+
+export type AdminStore = Store & { is_active: boolean; products: number };
 
 export type Rider = {
   id: string;

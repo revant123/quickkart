@@ -33,9 +33,10 @@ export function AddressForm({
   const lookupPincode = async (value: string) => {
     if (!/^[1-9][0-9]{5}$/.test(value)) return;
     try {
-      const p = await api<{ area: string; city: string }>(`/pincodes/${value}`);
+      const p = await api<{ area: string; city: string; precise: boolean }>(`/pincodes/${value}`);
       if (!city.trim()) setCity(p.city);
       if (!line2.trim()) setLine2(p.area);
+      if (!p.precise && !gps) setGpsNote('We only know roughly where this pincode is. Use your exact location so the right store can deliver.');
     } catch {
       /* unknown pincode: the server explains when saving */
     }

@@ -172,6 +172,7 @@ export function CheckoutPage() {
                           {a.phone}
                           {kmFromStore(a) && ` · ${kmFromStore(a)} km from ${store?.name}`}
                           {far && ' · too far for this store'}
+                          {far && !a.precise && ' (this address is placed by its pincode only; edit it and use your exact location)'}
                         </span>
                       </label>
                     </div>

@@ -84,6 +84,9 @@ function LocationDialog({ onClose }: { onClose: () => void }) {
   };
 
   const delivering = result?.found.stores.filter((s) => s.delivers) ?? [];
+  // The nearest few are what matter; with stores in many cities the full list is long
+  const shown = result ? result.found.stores.slice(0, Math.max(5, delivering.length)) : [];
+  const approximate = result && result.found.point.precise === false;
 
   return (
     <Modal title="Where should we deliver?" onClose={onClose} labelledBy="location-title">
@@ -93,7 +96,7 @@ function LocationDialog({ onClose }: { onClose: () => void }) {
       <div className="or"><span>or</span></div>
       <form className="inline-form" onSubmit={byPincode} noValidate>
         <label htmlFor="pincode" className="visually-hidden">Pincode</label>
-        <input id="pincode" className="input" inputMode="numeric" maxLength={6} placeholder="Pincode, e.g. 160017"
+        <input id="pincode" className="input" inputMode="numeric" maxLength={6} placeholder="Pincode, e.g. 560034"
           value={pincode} onChange={(e) => setPincode(e.target.value.replace(/\D/g, ''))} />
         <button className="btn btn-ghost" disabled={busy !== null}>{busy === 'pincode' ? 'Finding…' : 'Find stores'}</button>
       </form>
@@ -104,15 +107,20 @@ function LocationDialog({ onClose }: { onClose: () => void }) {
           <p className="small muted">
             {delivering.length
               ? `${delivering.length === 1 ? 'This store delivers' : 'These stores deliver'} to ${result.where.label}:`
-              : `No store delivers to ${result.where.label} yet. Stores deliver within ${result.found.stores[0]?.radius_km ?? 7} km. You can still browse:`}
+              : `No store delivers to ${result.where.label} yet. Stores deliver within ${result.found.stores[0]?.radius_km ?? 7} km. The nearest:`}
           </p>
+          {approximate && (
+            <p className="small muted">
+              This pincode&rsquo;s position is approximate. For exact distances, use your current location.
+            </p>
+          )}
           <ul>
-            {result.found.stores.map((s) => (
+            {shown.map((s) => (
               <li key={s.id} className={s.delivers ? '' : 'far'}>
                 <div>
                   <strong>{s.name}</strong>
                   <div className="muted small">
-                    {s.address} · {s.distance_km} km {s.delivers ? '' : '(too far to deliver)'}
+                    {s.address} · {s.distance_km.toLocaleString('en-IN')} km {s.delivers ? '' : '(too far to deliver)'}
                   </div>
                 </div>
                 <button className={`btn btn-sm ${s.delivers ? 'btn-primary' : 'btn-ghost'}`}
